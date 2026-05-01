@@ -1,0 +1,5 @@
+# Ejemplo de entrada de crontab para correr el agente cada hora.
+# Reemplazá /ruta/al/proyecto con la ruta absoluta donde clonaste el repo.
+# Editá tu crontab con: crontab -e
+
+0 * * * * cd /ruta/al/proyecto && /ruta/al/proyecto/.venv/bin/python -m agent.main >> /ruta/al/proyecto/.state/agent.log 2>&1
