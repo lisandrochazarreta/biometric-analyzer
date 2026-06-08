@@ -1,0 +1,14 @@
+# Connect IQ build
+bin/
+*.prg
+*.iq
+*.der
+developer_key
+
+# Android / Gradle
+companion-android/.gradle/
+companion-android/build/
+companion-android/app/build/
+companion-android/app/libs/*.aar
+companion-android/local.properties
+.idea/

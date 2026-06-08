@@ -1,0 +1,5 @@
+# Build config del data-field. Construir con:
+#   monkeyc -f monkey.jungle -o bin/GhostGap.prg -y developer_key -d fr265
+project.manifest = manifest.xml
+base.sourcePath = source
+base.resourcePath = resources

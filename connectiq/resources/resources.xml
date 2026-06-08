@@ -1,0 +1,4 @@
+<resources>
+    <!-- El fantasma exportado con: python -m ghost.export_ciq ... -->
+    <jsonData id="GhostData" filename="data/ghost.json"/>
+</resources>
