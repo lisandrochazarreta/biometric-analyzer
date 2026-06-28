@@ -11,7 +11,12 @@ window.SEED_DATA = {
     titulo: "Finanzas Personales",
     moneda: "ARS",
     usdRate: 1450,        // ARS por USD (editable en Configuración)
-    saldoInicial: 0       // ahorro acumulado antes del primer mes
+    saldoInicial: 0,      // ahorro acumulado antes del primer mes
+    // Ajustes manuales del ahorro acumulado, por nombre de mes. Si un mes tiene
+    // un valor acá, el acumulado se fija en ese número (y los meses siguientes
+    // siguen sumando a partir de él). Replica el valor cargado a mano en el
+    // Excel para Abril; vacialo en Configuración para volver a la suma automática.
+    accumOverrides: { "Abril": 13057025 }
   },
   months: ["Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio"],
   income: [

@@ -64,7 +64,10 @@ y qué ingresos cuentan como sueldo (los préstamos vienen desmarcados).
 
 - `Egresos = Gastos fijos + Gastos variables`
 - `Ahorro neto = Ingresos − Egresos`
-- `Ahorro acumulado = saldo inicial + suma de ahorros netos`
+- `Ahorro acumulado = saldo inicial + suma de ahorros netos` (salvo meses con
+  ajuste manual: ahí el acumulado se fija en el valor cargado y los meses
+  siguientes suman desde ahí — replica el valor escrito a mano en Abril del Excel).
+  Se editan en **Configuración → Ahorro acumulado — ajustes manuales**.
 - `Tasa de ahorro = Ahorro neto / Ingresos`
 - El USD es solo para mostrar; todos los cálculos son en pesos.
 

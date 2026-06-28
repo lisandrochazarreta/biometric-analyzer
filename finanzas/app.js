@@ -30,6 +30,7 @@
     d.meta.titulo = d.meta.titulo || "Finanzas Personales";
     d.meta.usdRate = Number(d.meta.usdRate) || 1450;
     d.meta.saldoInicial = Number(d.meta.saldoInicial) || 0;
+    if (!d.meta.accumOverrides || typeof d.meta.accumOverrides !== "object") d.meta.accumOverrides = {};
     d.months = Array.isArray(d.months) ? d.months : [];
     ["income", "fixed", "variable"].forEach(k => {
       d[k] = Array.isArray(d[k]) ? d[k] : [];
@@ -86,6 +87,9 @@
       const eg = fx + vr;
       const ah = inc - eg;
       run += ah;
+      // Ajuste manual del acumulado para este mes (replica celdas pisadas a mano)
+      const ov = state.meta.accumOverrides ? state.meta.accumOverrides[state.months[m]] : undefined;
+      if (ov !== undefined && ov !== null && ov !== "") run = num(ov);
       income.push(inc); fixed.push(fx); variable.push(vr);
       egresos.push(eg); ahorro.push(ah); accum.push(run);
       rate.push(inc > 0 ? (ah / inc) * 100 : 0);
@@ -385,10 +389,14 @@
     if (rangeEl) rangeEl.textContent = " " + range;
 
     const tasa = totIng > 0 ? (totAho / totIng) * 100 : 0;
+    const accumFinal = M ? s.accum[M - 1] : 0;
+    const hasOverride = Object.keys(state.meta.accumOverrides || {}).length > 0;
     const genCards = [
       { label: "Ingresos totales", value: money(totIng), sub: usd(totIng), cls: "accent" },
       { label: "Egresos totales", value: money(totEgr), sub: usd(totEgr), cls: "" },
-      { label: "Ahorro total", value: money(totAho), sub: usd(totAho), cls: totAho >= 0 ? "good" : "bad" },
+      { label: "Ahorro neto del período", value: money(totAho), sub: "suma de ingresos − egresos", cls: totAho >= 0 ? "good" : "bad" },
+      { label: "Ahorro acumulado final", value: money(accumFinal),
+        sub: hasOverride ? "incluye ajustes manuales" : usd(accumFinal), cls: accumFinal >= 0 ? "good" : "bad" },
       { label: "Tasa de ahorro media", value: fmtPct(tasa), sub: "sobre ingresos del período", cls: tasa >= 0 ? "good" : "bad" },
       { label: "Egreso promedio / mes", value: money(M ? totEgr / M : 0), sub: usd(M ? totEgr / M : 0), cls: "" },
       { label: "Ahorro promedio / mes", value: money(M ? totAho / M : 0), sub: usd(M ? totAho / M : 0), cls: totAho >= 0 ? "good" : "bad" }
@@ -529,6 +537,25 @@
     document.getElementById("cfg-usd").value = state.meta.usdRate;
     document.getElementById("cfg-saldo").value = state.meta.saldoInicial;
     renderSalaryConfig();
+    renderAccumConfig();
+  }
+
+  function renderAccumConfig() {
+    const tbl = document.getElementById("cfg-accum-table");
+    if (!tbl) return;
+    const s = series();
+    const ov = state.meta.accumOverrides || {};
+    let html = `<thead><tr><th class="cat">Mes</th><th>Acumulado</th><th>Ajuste manual</th></tr></thead><tbody>`;
+    state.months.forEach((mn, m) => {
+      const has = ov[mn] !== undefined && ov[mn] !== null && ov[mn] !== "";
+      html += `<tr><td class="cat">${escapeHtml(mn)}</td>
+        <td>${fmtNum.format(s.accum[m])}${has ? " ✏️" : ""}</td>
+        <td><input type="text" inputmode="decimal" data-accum="${escapeAttr(mn)}"
+          placeholder="${fmtNum.format(s.accum[m])}"
+          value="${has ? fmtNum.format(num(ov[mn])) : ""}"/></td></tr>`;
+    });
+    html += `</tbody>`;
+    tbl.innerHTML = html;
   }
 
   function renderSalaryConfig() {
@@ -665,6 +692,15 @@
     if (i === undefined) return;
     state.income[i].isSalary = e.target.checked;
     save(); renderKpis(); renderCharts();
+  });
+  // Ajustes manuales del acumulado
+  document.getElementById("cfg-accum-table").addEventListener("change", (e) => {
+    const mn = e.target.dataset.accum;
+    if (mn === undefined) return;
+    const raw = e.target.value.trim();
+    if (raw === "") delete state.meta.accumOverrides[mn];
+    else state.meta.accumOverrides[mn] = num(raw);
+    save(); renderKpis(); renderCharts(); renderAccumConfig();
   });
 
   // Exportar JSON
