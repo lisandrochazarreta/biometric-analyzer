@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Finanzas Personales</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="app">
+      <h1>💰 Finanzas <span>Personales</span></h1>
+      <div class="toolbar">
+        <button id="btn-import" class="ghost" title="Cargar un respaldo .json">⬆️ Importar</button>
+        <button id="btn-export" class="ghost" title="Descargar un respaldo .json">⬇️ Exportar</button>
+        <button id="btn-csv" class="ghost" title="Descargar resumen en CSV">📄 CSV</button>
+        <button id="btn-seed" class="ghost" title="Volver a los datos de ejemplo">↺ Ejemplo</button>
+        <button id="btn-clear" class="danger ghost" title="Borrar todos los datos">🗑️ Vaciar</button>
+        <input type="file" id="file-input" accept="application/json" style="display:none" />
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="dashboard">📊 Resumen</button>
+      <button class="tab" data-tab="datos">✏️ Cargar datos</button>
+      <button class="tab" data-tab="config">⚙️ Configuración</button>
+    </nav>
+
+    <!-- ================= DASHBOARD ================= -->
+    <section class="panel active" id="panel-dashboard">
+      <div class="month-bar">
+        <label for="month-select">Mes:</label>
+        <select id="month-select"></select>
+      </div>
+
+      <div class="kpis" id="kpis"></div>
+
+      <div class="grid">
+        <div class="card wide">
+          <h3>Ingresos · Egresos · Ahorro por mes</h3>
+          <div class="chart-box"><canvas id="chart-flow"></canvas></div>
+        </div>
+        <div class="card">
+          <h3>Ahorro acumulado</h3>
+          <div class="chart-box"><canvas id="chart-accum"></canvas></div>
+        </div>
+        <div class="card">
+          <h3>Gastos fijos vs variables</h3>
+          <div class="chart-box"><canvas id="chart-fv"></canvas></div>
+        </div>
+        <div class="card">
+          <h3>Distribución de gastos del mes</h3>
+          <div class="chart-box"><canvas id="chart-breakdown"></canvas></div>
+        </div>
+        <div class="card">
+          <h3>Top categorías de gasto del mes</h3>
+          <div class="chart-box"><canvas id="chart-top"></canvas></div>
+        </div>
+        <div class="card wide">
+          <h3>Tasa de ahorro sobre ingresos (%)</h3>
+          <div class="chart-box"><canvas id="chart-rate"></canvas></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= CARGAR DATOS ================= -->
+    <section class="panel" id="panel-datos">
+      <p class="hint">
+        Editá cualquier celda directamente. Usá <b>+ Categoría</b> para agregar una fila,
+        <b>+ Mes</b> para una columna nueva, y la <b>✕</b> para eliminar. Todo se guarda solo en este navegador.
+      </p>
+      <div class="month-bar">
+        <button id="btn-add-month" class="primary">＋ Mes</button>
+        <button id="btn-del-month" class="ghost danger">✕ Eliminar último mes</button>
+      </div>
+
+      <div class="table-section" id="tbl-income"></div>
+      <div class="table-section" id="tbl-fixed"></div>
+      <div class="table-section" id="tbl-variable"></div>
+    </section>
+
+    <!-- ================= CONFIG ================= -->
+    <section class="panel" id="panel-config">
+      <h2 class="section-title">Configuración</h2>
+      <div class="settings-grid">
+        <div class="field">
+          <label for="cfg-title">Título de la app</label>
+          <input type="text" id="cfg-title" />
+        </div>
+        <div class="field">
+          <label for="cfg-usd">Tipo de cambio (ARS por USD)</label>
+          <input type="number" id="cfg-usd" min="0" step="1" />
+        </div>
+        <div class="field">
+          <label for="cfg-saldo">Saldo inicial / ahorro previo (ARS)</label>
+          <input type="number" id="cfg-saldo" step="1" />
+        </div>
+      </div>
+      <p class="hint">El tipo de cambio solo afecta los equivalentes en USD que se muestran; los cálculos se hacen en pesos.</p>
+    </section>
+
+    <footer>
+      Hecho a partir de tu Excel · Los datos viven solo en tu navegador (localStorage) ·
+      Exportá un respaldo de vez en cuando.
+    </footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="seed.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
