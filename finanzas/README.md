@@ -29,6 +29,15 @@ gráficos y tablas editables.
 - Top categorías de gasto del mes
 - Tasa de ahorro sobre ingresos (%)
 
+*¿Cuánto te queda del sueldo?* (mes a mes, según ingresos vs gastos):
+- Tarjetas del mes: cuánto te queda del **sueldo principal** (Arpov) y de **todos los sueldos**, con el % disponible.
+- Sueldos vs egresos (sueldo principal · todos los sueldos · egresos)
+- Lo que te queda cada mes en $ (verde si sobra, rojo si no alcanza)
+- % disponible tras pagar todos los gastos (principal vs todos los sueldos)
+
+En **Configuración → Análisis de sueldos** elegís cuál es el sueldo principal
+y qué ingresos cuentan como sueldo (los préstamos vienen desmarcados).
+
 *Visión general del período* (totales de todos los meses, no depende del mes elegido):
 - Tarjetas con totales y promedios mensuales (ingresos, egresos, ahorro, tasa media).
 - Ingresos · Egresos · Ahorro (totales del período)

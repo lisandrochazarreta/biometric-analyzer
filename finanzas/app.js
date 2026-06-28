@@ -41,6 +41,16 @@
         row.values = row.values.map(v => num(v));
       });
     });
+    // Roles para el análisis de sueldos: por defecto todo ingreso es sueldo,
+    // salvo los que parezcan préstamos.
+    d.income.forEach(r => {
+      if (r.isSalary === undefined) r.isSalary = !/pr[eé]stamo/i.test(r.name);
+    });
+    if (!d.meta.primaryIncome || !d.income.some(r => r.name === d.meta.primaryIncome)) {
+      const arpov = d.income.find(r => /arpov/i.test(r.name));
+      const firstSalary = d.income.find(r => r.isSalary) || d.income[0];
+      d.meta.primaryIncome = (arpov || firstSalary || { name: "" }).name;
+    }
     return d;
   }
 
@@ -83,6 +93,26 @@
     return { income, fixed, variable, egresos, ahorro, accum, rate };
   }
 
+  // Análisis de sueldos: cuánto queda del sueldo principal y de todos los sueldos
+  // tras pagar los egresos del mes.
+  function salaryAnalysis(s) {
+    const M = state.months.length;
+    const primaryRow = state.income.find(r => r.name === state.meta.primaryIncome);
+    const primaryName = primaryRow ? primaryRow.name : "(sin definir)";
+    const salaryNames = state.income.filter(r => r.isSalary).map(r => r.name);
+    const principal = [], sueldos = [], remPrincipal = [], remSueldos = [], pctPrincipal = [], pctSueldos = [];
+    for (let m = 0; m < M; m++) {
+      const p = primaryRow ? num(primaryRow.values[m]) : 0;
+      const sd = state.income.reduce((a, r) => a + (r.isSalary ? num(r.values[m]) : 0), 0);
+      const eg = s.egresos[m];
+      principal.push(p); sueldos.push(sd);
+      remPrincipal.push(p - eg); remSueldos.push(sd - eg);
+      pctPrincipal.push(p > 0 ? (p - eg) / p * 100 : 0);
+      pctSueldos.push(sd > 0 ? (sd - eg) / sd * 100 : 0);
+    }
+    return { primaryName, salaryNames, principal, sueldos, remPrincipal, remSueldos, pctPrincipal, pctSueldos };
+  }
+
   /* ===========================================================================
    * RENDER
    * ========================================================================= */
@@ -115,6 +145,7 @@
     const box = document.getElementById("kpis");
     if (!state.months.length) { box.innerHTML = "<p class='hint'>Agregá un mes en la pestaña «Cargar datos».</p>"; return; }
     const s = series();
+    const sal = salaryAnalysis(s);
     const m = currentMonth;
     const ahorro = s.ahorro[m];
     const cards = [
@@ -124,7 +155,13 @@
       { label: "Tasa de ahorro", value: fmtPct(s.rate[m]), sub: "de los ingresos del mes", cls: s.rate[m] >= 0 ? "good" : "bad" },
       { label: "Gastos fijos", value: money(s.fixed[m]), sub: pctOf(s.fixed[m], s.egresos[m]) + " de egresos", cls: "" },
       { label: "Gastos variables", value: money(s.variable[m]), sub: pctOf(s.variable[m], s.egresos[m]) + " de egresos", cls: "" },
-      { label: "Ahorro acumulado", value: money(s.accum[m]), sub: usd(s.accum[m]), cls: "good" }
+      { label: "Ahorro acumulado", value: money(s.accum[m]), sub: usd(s.accum[m]), cls: "good" },
+      { label: "Te queda del sueldo " + sal.primaryName, value: money(sal.remPrincipal[m]),
+        sub: fmtPct(sal.pctPrincipal[m]) + " del sueldo · gastás " + pctOf(s.egresos[m], sal.principal[m]),
+        cls: sal.remPrincipal[m] >= 0 ? "good" : "bad" },
+      { label: "Te queda de los sueldos", value: money(sal.remSueldos[m]),
+        sub: fmtPct(sal.pctSueldos[m]) + " de los sueldos del mes",
+        cls: sal.remSueldos[m] >= 0 ? "good" : "bad" }
     ];
     box.innerHTML = cards.map(c =>
       `<div class="kpi ${c.cls}"><div class="label">${c.label}</div>
@@ -267,7 +304,70 @@
       }
     });
 
+    renderSalaryCharts(s, labels);
     renderGeneral(s);
+  }
+
+  /* ---------- Gráficos de sueldos (mes a mes) ---------- */
+  function renderSalaryCharts(s, labels) {
+    const sal = salaryAnalysis(s);
+    const lbl = document.getElementById("lbl-principal");
+    if (lbl) lbl.textContent = sal.primaryName;
+
+    // Sueldos vs egresos (barras agrupadas)
+    mk("chart-sal-abs", {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          { label: "Sueldo " + sal.primaryName, data: sal.principal, backgroundColor: "#5b8cff" },
+          { label: "Todos los sueldos", data: sal.sueldos, backgroundColor: "#22d3ee" },
+          { label: "Egresos", data: s.egresos, backgroundColor: "#f87171" }
+        ]
+      },
+      options: baseOpts()
+    });
+
+    // Lo que queda cada mes ($) — barras coloreadas por signo
+    const colBySign = (arr, pos, neg) => arr.map(v => (v >= 0 ? pos : neg));
+    mk("chart-sal-rem", {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          { label: "Te queda del sueldo " + sal.primaryName, data: sal.remPrincipal,
+            backgroundColor: colBySign(sal.remPrincipal, "#34d399", "#f87171") },
+          { label: "Te queda de los sueldos", data: sal.remSueldos,
+            backgroundColor: colBySign(sal.remSueldos, "#a78bfa", "#fb923c") }
+        ]
+      },
+      options: baseOpts()
+    });
+
+    // % disponible (líneas)
+    mk("chart-sal-pct", {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          { label: "% disponible del sueldo " + sal.primaryName, data: sal.pctPrincipal,
+            borderColor: "#5b8cff", backgroundColor: "#5b8cff", tension: 0.3, borderWidth: 2, pointRadius: 3, fill: false },
+          { label: "% disponible de los sueldos", data: sal.pctSueldos,
+            borderColor: "#34d399", backgroundColor: "#34d399", tension: 0.3, borderWidth: 2, pointRadius: 3, fill: false }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: TICK, boxWidth: 12, font: { size: 11 } } },
+          tooltip: { callbacks: { label: (ctx) => ` ${ctx.dataset.label}: ${fmtPct(ctx.parsed.y)}` } }
+        },
+        scales: {
+          x: { ticks: { color: TICK }, grid: { color: GRID } },
+          y: { ticks: { color: TICK, callback: (v) => v + "%" }, grid: { color: GRID } }
+        }
+      }
+    });
   }
 
   /* ---------- Gráficos generales (todo el período) ---------- */
@@ -428,6 +528,22 @@
     document.getElementById("cfg-title").value = state.meta.titulo;
     document.getElementById("cfg-usd").value = state.meta.usdRate;
     document.getElementById("cfg-saldo").value = state.meta.saldoInicial;
+    renderSalaryConfig();
+  }
+
+  function renderSalaryConfig() {
+    const sel = document.getElementById("cfg-principal");
+    if (sel) {
+      sel.innerHTML = state.income.map(r =>
+        `<option value="${escapeAttr(r.name)}" ${r.name === state.meta.primaryIncome ? "selected" : ""}>${escapeHtml(r.name)}</option>`
+      ).join("");
+    }
+    const list = document.getElementById("cfg-salary-list");
+    if (list) {
+      list.innerHTML = state.income.map((r, i) =>
+        `<label class="salary-row"><input type="checkbox" data-salary="${i}" ${r.isSalary ? "checked" : ""}/> ${escapeHtml(r.name)}</label>`
+      ).join("");
+    }
   }
 
   /* ===========================================================================
@@ -454,7 +570,10 @@
     const { key, row, field, col } = t.dataset;
     const r = state[key] && state[key][row];
     if (!r) return;
-    if (field === "name") { r.name = t.value; }
+    if (field === "name") {
+      if (key === "income" && state.meta.primaryIncome === r.name) state.meta.primaryIncome = t.value;
+      r.name = t.value;
+    }
     else if (col !== undefined) { r.values[col] = num(t.value); }
     save();
     // refrescar totales/dashboard sin re-render completo (para no perder foco)
@@ -494,13 +613,16 @@
     const del = e.target.closest(".del-row");
     if (add) {
       const key = add.dataset.key;
-      state[key].push({ name: "Nueva categoría", values: new Array(state.months.length).fill(0) });
-      save(); renderTables(); renderKpis(); renderCharts();
+      const row = { name: key === "income" ? "Nuevo ingreso" : "Nueva categoría", values: new Array(state.months.length).fill(0) };
+      if (key === "income") row.isSalary = true;
+      state[key].push(row);
+      save(); renderTables(); renderKpis(); renderCharts(); if (key === "income") renderSalaryConfig();
     }
     if (del) {
       const key = del.dataset.key, ri = parseInt(del.dataset.row, 10);
       state[key].splice(ri, 1);
-      save(); renderTables(); renderKpis(); renderCharts();
+      if (key === "income") normalize(state); // re-asegura primaryIncome válido
+      save(); renderTables(); renderKpis(); renderCharts(); if (key === "income") renderSalaryConfig();
     }
   });
 
@@ -537,6 +659,13 @@
   document.getElementById("cfg-title").addEventListener("input", (e) => { state.meta.titulo = e.target.value; save(); document.title = e.target.value; });
   document.getElementById("cfg-usd").addEventListener("input", (e) => { state.meta.usdRate = num(e.target.value) || 1; save(); renderKpis(); });
   document.getElementById("cfg-saldo").addEventListener("input", (e) => { state.meta.saldoInicial = num(e.target.value); save(); renderKpis(); renderCharts(); });
+  document.getElementById("cfg-principal").addEventListener("change", (e) => { state.meta.primaryIncome = e.target.value; save(); renderKpis(); renderCharts(); });
+  document.getElementById("cfg-salary-list").addEventListener("change", (e) => {
+    const i = e.target.dataset.salary;
+    if (i === undefined) return;
+    state.income[i].isSalary = e.target.checked;
+    save(); renderKpis(); renderCharts();
+  });
 
   // Exportar JSON
   document.getElementById("btn-export").addEventListener("click", () => {
