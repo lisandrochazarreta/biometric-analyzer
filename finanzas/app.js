@@ -266,6 +266,128 @@
         }
       }
     });
+
+    renderGeneral(s);
+  }
+
+  /* ---------- Gráficos generales (todo el período) ---------- */
+  function rowTotal(row) { return (row.values || []).reduce((a, b) => a + num(b), 0); }
+
+  function renderGeneral(s) {
+    const M = state.months.length;
+    const sum = (arr) => arr.reduce((a, b) => a + b, 0);
+    const totIng = sum(s.income), totFix = sum(s.fixed), totVar = sum(s.variable);
+    const totEgr = totFix + totVar, totAho = totIng - totEgr;
+
+    // Rango de meses y KPIs generales
+    const range = M ? `(${state.months[0]} – ${state.months[M - 1]}, ${M} ${M === 1 ? "mes" : "meses"})` : "";
+    const rangeEl = document.getElementById("gen-range");
+    if (rangeEl) rangeEl.textContent = " " + range;
+
+    const tasa = totIng > 0 ? (totAho / totIng) * 100 : 0;
+    const genCards = [
+      { label: "Ingresos totales", value: money(totIng), sub: usd(totIng), cls: "accent" },
+      { label: "Egresos totales", value: money(totEgr), sub: usd(totEgr), cls: "" },
+      { label: "Ahorro total", value: money(totAho), sub: usd(totAho), cls: totAho >= 0 ? "good" : "bad" },
+      { label: "Tasa de ahorro media", value: fmtPct(tasa), sub: "sobre ingresos del período", cls: tasa >= 0 ? "good" : "bad" },
+      { label: "Egreso promedio / mes", value: money(M ? totEgr / M : 0), sub: usd(M ? totEgr / M : 0), cls: "" },
+      { label: "Ahorro promedio / mes", value: money(M ? totAho / M : 0), sub: usd(M ? totAho / M : 0), cls: totAho >= 0 ? "good" : "bad" }
+    ];
+    const genBox = document.getElementById("kpis-gen");
+    if (genBox) genBox.innerHTML = genCards.map(c =>
+      `<div class="kpi ${c.cls}"><div class="label">${c.label}</div>
+        <div class="value">${c.value}</div><div class="sub">${c.sub}</div></div>`).join("");
+
+    if (!M) { ["chart-gen-totals", "chart-gen-split", "chart-gen-expenses", "chart-gen-income", "chart-gen-top", "chart-gen-avg"].forEach(id => { if (charts[id]) charts[id].destroy(); }); return; }
+
+    // Totales: ingresos / egresos / ahorro
+    mk("chart-gen-totals", {
+      type: "bar",
+      data: {
+        labels: ["Ingresos", "Egresos", "Ahorro"],
+        datasets: [{ label: "Total período", data: [totIng, totEgr, totAho],
+          backgroundColor: ["#5b8cff", "#f87171", "#34d399"] }]
+      },
+      options: baseOpts({ plugins: { legend: { display: false } } })
+    });
+
+    // Composición de egresos: fijos vs variables
+    mk("chart-gen-split", {
+      type: "doughnut",
+      data: {
+        labels: ["Gastos fijos", "Gastos variables"],
+        datasets: [{ data: [totFix, totVar], backgroundColor: ["#a78bfa", "#fbbf24"], borderColor: "#161d2e", borderWidth: 2 }]
+      },
+      options: pieOpts()
+    });
+
+    // Gasto total por categoría (fijos + variables), todo el período
+    const cats = [...state.fixed, ...state.variable]
+      .map(r => ({ name: r.name, v: rowTotal(r) }))
+      .filter(x => x.v > 0).sort((a, b) => b.v - a.v);
+    mk("chart-gen-expenses", {
+      type: "doughnut",
+      data: {
+        labels: cats.map(x => x.name),
+        datasets: [{ data: cats.map(x => x.v), backgroundColor: cats.map((_, i) => PALETTE[i % PALETTE.length]), borderColor: "#161d2e", borderWidth: 2 }]
+      },
+      options: pieOpts("right", 10.5)
+    });
+
+    // Ingresos por fuente (período)
+    const srcs = state.income.map(r => ({ name: r.name, v: rowTotal(r) })).filter(x => x.v > 0).sort((a, b) => b.v - a.v);
+    mk("chart-gen-income", {
+      type: "doughnut",
+      data: {
+        labels: srcs.map(x => x.name),
+        datasets: [{ data: srcs.map(x => x.v), backgroundColor: srcs.map((_, i) => PALETTE[(i + 3) % PALETTE.length]), borderColor: "#161d2e", borderWidth: 2 }]
+      },
+      options: pieOpts()
+    });
+
+    // Top categorías del período (horizontal)
+    const top = cats.slice(0, 10);
+    mk("chart-gen-top", {
+      type: "bar",
+      data: {
+        labels: top.map(x => x.name),
+        datasets: [{ label: "Gasto del período", data: top.map(x => x.v), backgroundColor: top.map((_, i) => PALETTE[i % PALETTE.length]) }]
+      },
+      options: baseOpts({ indexAxis: "y", plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: TICK, callback: (v) => fmtNum.format(v) }, grid: { color: GRID } },
+          y: { ticks: { color: TICK, font: { size: 11 } }, grid: { color: GRID } }
+        } })
+    });
+
+    // Promedio mensual por categoría (fijos + variables)
+    const avg = cats.map(x => ({ name: x.name, v: x.v / M })).sort((a, b) => b.v - a.v);
+    mk("chart-gen-avg", {
+      type: "bar",
+      data: {
+        labels: avg.map(x => x.name),
+        datasets: [{ label: "Promedio mensual", data: avg.map(x => x.v), backgroundColor: avg.map((_, i) => PALETTE[i % PALETTE.length]) }]
+      },
+      options: baseOpts({ plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: TICK, font: { size: 10 }, maxRotation: 60, minRotation: 45 }, grid: { color: GRID } },
+          y: { ticks: { color: TICK, callback: (v) => fmtNum.format(v) }, grid: { color: GRID } }
+        } })
+    });
+  }
+
+  function pieOpts(pos, fontSize) {
+    return {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: pos || "bottom", labels: { color: TICK, boxWidth: 12, font: { size: fontSize || 11 } } },
+        tooltip: { callbacks: { label: (ctx) => {
+          const data = ctx.dataset.data, tot = data.reduce((a, b) => a + b, 0);
+          const p = tot ? (ctx.parsed / tot * 100).toFixed(1) : 0;
+          return ` ${ctx.label}: ${money(ctx.parsed)} (${p}%)`;
+        } } }
+      }
+    };
   }
 
   /* ---------- Tablas editables ---------- */

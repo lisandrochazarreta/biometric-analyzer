@@ -35,6 +35,7 @@
 
       <div class="kpis" id="kpis"></div>
 
+      <h2 class="section-title">📅 Mes a mes</h2>
       <div class="grid">
         <div class="card wide">
           <h3>Ingresos · Egresos · Ahorro por mes</h3>
@@ -59,6 +60,35 @@
         <div class="card wide">
           <h3>Tasa de ahorro sobre ingresos (%)</h3>
           <div class="chart-box"><canvas id="chart-rate"></canvas></div>
+        </div>
+      </div>
+
+      <h2 class="section-title" style="margin-top:30px">🌐 Visión general del período <span id="gen-range" style="text-transform:none;color:var(--text-dim)"></span></h2>
+      <div class="kpis" id="kpis-gen"></div>
+      <div class="grid">
+        <div class="card">
+          <h3>Ingresos · Egresos · Ahorro (totales del período)</h3>
+          <div class="chart-box"><canvas id="chart-gen-totals"></canvas></div>
+        </div>
+        <div class="card">
+          <h3>Composición de egresos del período</h3>
+          <div class="chart-box"><canvas id="chart-gen-split"></canvas></div>
+        </div>
+        <div class="card">
+          <h3>Gasto total por categoría (período)</h3>
+          <div class="chart-box"><canvas id="chart-gen-expenses"></canvas></div>
+        </div>
+        <div class="card">
+          <h3>Ingresos por fuente (período)</h3>
+          <div class="chart-box"><canvas id="chart-gen-income"></canvas></div>
+        </div>
+        <div class="card wide">
+          <h3>Top categorías de gasto del período</h3>
+          <div class="chart-box"><canvas id="chart-gen-top"></canvas></div>
+        </div>
+        <div class="card wide">
+          <h3>Promedio mensual por categoría de gasto</h3>
+          <div class="chart-box"><canvas id="chart-gen-avg"></canvas></div>
         </div>
       </div>
     </section>

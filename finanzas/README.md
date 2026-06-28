@@ -17,7 +17,9 @@ gráficos y tablas editables.
 
 ## Qué incluye
 
-**Pestaña Resumen** (mes seleccionable):
+**Pestaña Resumen** — dos bloques:
+
+*Mes a mes* (con el mes seleccionable arriba):
 - Tarjetas con Ingresos, Egresos, Ahorro neto, Tasa de ahorro, Gastos fijos,
   Gastos variables y Ahorro acumulado (con equivalente en USD).
 - Ingresos · Egresos · Ahorro por mes
@@ -26,6 +28,15 @@ gráficos y tablas editables.
 - Distribución de gastos del mes (dona)
 - Top categorías de gasto del mes
 - Tasa de ahorro sobre ingresos (%)
+
+*Visión general del período* (totales de todos los meses, no depende del mes elegido):
+- Tarjetas con totales y promedios mensuales (ingresos, egresos, ahorro, tasa media).
+- Ingresos · Egresos · Ahorro (totales del período)
+- Composición de egresos (fijos vs variables)
+- Gasto total por categoría (dona)
+- Ingresos por fuente (dona)
+- Top categorías de gasto del período
+- Promedio mensual por categoría
 
 **Pestaña Cargar datos:**
 - Tres tablas editables: Ingresos, Gastos fijos, Gastos variables.
