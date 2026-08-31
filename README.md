@@ -1,3 +1,13 @@
+# biometric-analyzer
+
+Repo con dos agentes independientes:
+
+- **[`carrito/`](carrito/README.md)** — agente de WhatsApp que te arma el carrito
+  del supermercado (Coto, Jumbo, Disco, Vea, Carrefour, DIA, ChangoMás).
+- **`agent/`** — watcher de descuentos de PedidosYa Market, documentado abajo.
+
+---
+
 # PedidosYa Market — Discount Agent
 
 Agente que escanea el catálogo de **PedidosYa Market** alcanzable desde una
