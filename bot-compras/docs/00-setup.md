@@ -217,3 +217,64 @@ y errores de entrega (típicamente certificado vencido). Con `--enviar
 Si algún día te pasás del free tier de Gemini, poné `usar_ia = false` en `Config`
 y el bot sigue andando solo con el diccionario. No se rompe nada: los mensajes
 que no entienda te los devuelve para que los escribas más simple.
+
+---
+
+## Apéndice — qué se puede hacer desde el celular
+
+| Paso | Celular | Por qué |
+|---|---|---|
+| 1. Crear el bot en BotFather | ✅ **mejor que en la compu** | BotFather es un chat de Telegram |
+| 1b. `/setprivacy` → Disable | ✅ | ídem |
+| 2. Crear el grupo y agregar el bot | ✅ | ídem |
+| 2b. Sacar los 3 ids | ✅ | ver abajo, sin terminal |
+| 3. Completar la hoja `Config` | ✅ | la app de Google Sheets edita celdas bien |
+| 4. Credencial de Google en n8n | ❌ | Google Cloud Console en el celular es inusable |
+| 5. Importar los workflows en n8n | ❌ | el editor de n8n es un canvas de escritorio |
+| 6. Activar y probar | ✅ | es un toggle, y después escribís en el grupo |
+| `tools/diagnostico.js` | ⚠️ | necesita Node. En Android anda con Termux; en iOS no |
+
+**Resumen: los pasos 4 y 5 necesitan una compu, unos 15 minutos.** Todo el resto
+lo hacés desde el teléfono, y de hecho es más cómodo ahí.
+
+### Sacar los ids sin terminal
+
+**Opción A — desde el navegador del celular.** Abrí:
+
+```
+https://api.telegram.org/bot<TOKEN>/getUpdates
+```
+
+Te devuelve JSON crudo. Usá *Buscar en la página*:
+
+- Buscá `"id":-` → el número negativo que sigue es el **`grupo_chat_id`**.
+- Buscá `"is_bot":false` → el `"id"` que está unas palabras antes, en el mismo
+  bloque `"from"`, es el **`user_id`** de esa persona.
+
+Que escriban los dos en el grupo antes, y refrescá.
+
+**Opción B — con un bot que te lo dice.** Agregá **@RawDataBot** al grupo: postea
+un mensaje con el `chat_id` y tu `user_id` a la vista, sin JSON. Sacalo del grupo
+apenas lo anotaste.
+
+> Es un bot de terceros: mientras esté en el grupo ve lo que se escribe. Para un
+> grupo recién creado y vacío no es gran cosa, pero si preferís no sumar a nadie,
+> usá la opción A.
+
+**Opción C — revisá el `getMe` también.** Abrí
+`https://api.telegram.org/bot<TOKEN>/getMe` y buscá
+`can_read_all_group_messages`. Si dice `false`, el privacy mode quedó activado y
+el bot va a ignorar todo lo que no empiece con `/`. Es el mismo chequeo que hace
+`tools/diagnostico.js`, pero desde el navegador.
+
+### Un atajo para el paso 4
+
+En vez de OAuth2, la credencial de Google Sheets en n8n también acepta
+**Service Account**: creás una en Google Cloud, bajás el JSON de la key, lo
+pegás en n8n, y **compartís el Sheet con el email de la service account** (el
+que termina en `.iam.gserviceaccount.com`) con permiso de Editor.
+
+Es más simple que OAuth porque **no hay pantalla de consentimiento ni redirect
+URI**, que es justamente la parte que se rompe en el celular. Y para un bot que
+corre solo es mejor: no queda atado a tu sesión personal ni se vence cuando
+cambiás la contraseña.
