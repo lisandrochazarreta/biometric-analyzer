@@ -56,24 +56,28 @@ deshacer - Revertir mi último cambio
 2. Agregá al bot al grupo.
 3. Escribí cualquier cosa en el grupo.
 
-Ahora necesitás **3 números**: el `chat_id` del grupo y los `user_id` de cada uno.
-Abrí en el navegador (reemplazando `<TOKEN>`):
+Ahora necesitás **3 números**: el `chat_id` del grupo y los `user_id` de cada
+uno. En vez de leer JSON a mano, corré el diagnóstico:
+
+```bash
+cd bot-compras
+node tools/diagnostico.js 8123456789:AAH...
+```
+
+Te chequea el token, te dice si el **privacy mode** quedó mal, y te imprime los
+ids listos para pegar en `Config`:
 
 ```
-https://api.telegram.org/bot<TOKEN>/getUpdates
+   grupo_chat_id          -1001234567890
+   persona_1_user_id      111222333
+   persona_1_nombre       Lisandro
+   persona_2_user_id      444555666
+   persona_2_nombre       Flor
 ```
 
-Buscá en el JSON:
-- `"chat":{"id":-1001234567890,...}` → ese negativo es **`grupo_chat_id`**.
-- `"from":{"id":111222333,...}` → el **`user_id`** de quien escribió.
-
-Que escriban los dos y refrescá para tener ambos ids.
-
-> Si `getUpdates` viene vacío: todavía no escribieron en el grupo, o ya hay un
-> webhook activo consumiendo los updates. En ese segundo caso,
-> `https://api.telegram.org/bot<TOKEN>/deleteWebhook` y probá de nuevo.
-
----
+Si dice que no vio mensajes, escriban algo en el grupo **los dos** y corrélo de
+nuevo. Si dice que hay un webhook activo, desactivá `compras-ingesta` en n8n
+primero (Telegram no deja usar webhook y `getUpdates` al mismo tiempo).
 
 ## 3. Completar la hoja `Config` — 3 min
 
@@ -186,8 +190,16 @@ Después probá esta secuencia, que ejercita todo:
 | `400 Bad Request: chat not found` | El token de `Config` tiene un espacio o le falta un pedazo. |
 | `parse_mode` error de Telegram | Un ítem tiene `<` o `&` en el nombre. Es un bug: avisame y lo escapo. |
 
-Los tres workflows escriben en la pestaña `Log` del Sheet. Filtrá por
-`resultado != ok` y ahí está todo lo que el bot no supo hacer.
+**Antes de revisar nada a mano, corré el diagnóstico:**
+
+```bash
+node tools/diagnostico.js <TOKEN>
+```
+
+Chequea las 5 cosas que rompen un bot recién armado: token inválido, privacy
+mode activado, webhook no registrado, updates encolados porque n8n no responde,
+y errores de entrega (típicamente certificado vencido). Con `--enviar
+--chat=<id>` además manda un mensaje de prueba al grupo.
 
 ---
 

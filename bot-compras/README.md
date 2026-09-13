@@ -65,6 +65,7 @@ bot-compras/
 ├── tools/
 │   ├── build_workflows.js  ← genera los JSON inyectando la librería
 │   ├── build_sheet.py      ← genera el .xlsx que se sube a Drive
+│   ├── diagnostico.js      ← chequea el bot desde tu máquina (corrélo si algo falla)
 │   └── validar_workflows.js
 ├── workflows/              ← los 3 JSON para importar en n8n
 └── docs/

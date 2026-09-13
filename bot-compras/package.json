@@ -9,6 +9,7 @@
     "sim": "node test/simulacion.js",
     "build": "node tools/build_workflows.js",
     "validate": "node tools/validar_workflows.js",
+    "diag": "node tools/diagnostico.js",
     "check": "npm test && npm run e2e && npm run build && npm run validate"
   }
 }
