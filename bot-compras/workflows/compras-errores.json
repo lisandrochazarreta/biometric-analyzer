@@ -1,0 +1,125 @@
+{
+  "name": "compras-errores",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "n001",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "method": "GET",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1Boax5fBBasvYdIy2AEmVhaNonSUGq1jB0IvMbxdEDfA/values:batchGet",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ranges",
+              "value": "Lista!A:O"
+            },
+            {
+              "name": "ranges",
+              "value": "Catalogo!A:E"
+            },
+            {
+              "name": "ranges",
+              "value": "Config!A:C"
+            },
+            {
+              "name": "majorDimension",
+              "value": "ROWS"
+            }
+          ]
+        }
+      },
+      "id": "n002",
+      "name": "Leer hojas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nfunction filasAObjetos(valueRange) {\n  const v = (valueRange && valueRange.values) || [];\n  if (!v.length) return [];\n  const head = v[0].map(h => String(h).trim());\n  return v.slice(1).map((fila, i) => {\n    const o = { _fila: i + 2 };                 // numero de fila real en la hoja\n    head.forEach((h, j) => { o[h] = fila[j] != null ? fila[j] : ''; });\n    return o;\n  });\n}\nfunction leerHojas(json) {\n  const r = json.valueRanges || [];\n  const lista = filasAObjetos(r[0]);\n  const catalogo = filasAObjetos(r[1]);\n  const cfgFilas = filasAObjetos(r[2]);\n  const config = {};\n  for (const f of cfgFilas) config[f.clave] = f.valor;\n  return { lista, catalogo, config };\n}\nconst COL = { id:'A', ciclo:'B', item:'C', variantes:'D', cantidad:'E', unidad:'F',\n              categoria:'G', pedido_por:'H', nota:'I', fecha_alta:'J', estado:'K',\n              fecha_compra:'L', veces_arrastrado:'M', origen:'N', msg_origen:'O' };\nconst ORDEN_COLS = ['id','ciclo','item','variantes','cantidad','unidad','categoria',\n                    'pedido_por','nota','fecha_alta','estado','fecha_compra',\n                    'veces_arrastrado','origen','msg_origen'];\nfunction filaDesdeObjeto(o) { return ORDEN_COLS.map(k => o[k] != null ? o[k] : ''); }\nfunction tg(config, metodo) {\n  return 'https://api.telegram.org/bot' + String(config.telegram_bot_token || '').trim() + '/' + metodo;\n}\n\nconst { config } = leerHojas($json);\nconst e = $('Error Trigger').first().json;\nconst txt = [\n  '⚠️ <b>Falló ' + (e.workflow && e.workflow.name) + '</b>',\n  'Nodo: ' + ((e.execution && e.execution.lastNodeExecuted) || '?'),\n  'Error: ' + String((e.execution && e.execution.error && e.execution.error.message) || '?').slice(0, 400),\n].join('\\n');\nreturn [{ json: { chat_id: config.persona_1_user_id, texto: txt, url: tg(config, 'sendMessage') } }];\n"
+      },
+      "id": "n003",
+      "name": "Armar aviso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.chat_id, text: $json.texto, parse_mode: \"HTML\" }) }}"
+      },
+      "id": "n004",
+      "name": "Avisarme",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Leer hojas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer hojas": {
+      "main": [
+        [
+          {
+            "node": "Armar aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar aviso": {
+      "main": [
+        [
+          {
+            "node": "Avisarme",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "America/Argentina/Buenos_Aires",
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

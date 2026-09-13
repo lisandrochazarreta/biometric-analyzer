@@ -1,3 +1,13 @@
+> **Creado.** El Sheet ya existe en tu Drive:
+> [Compras Casa](https://docs.google.com/spreadsheets/d/1Boax5fBBasvYdIy2AEmVhaNonSUGq1jB0IvMbxdEDfA/edit).
+> Se generó con `tools/build_sheet.py`. Este documento explica por qué cada
+> columna está donde está.
+>
+> **Los nombres y el orden de las columnas de `Lista` son contrato**: el código
+> escribe por rango (`Lista!E7`), así que mover una columna rompe las
+> escrituras. Si necesitás agregar una, agregala **al final** y actualizá
+> `ORDEN_COLS` en `tools/build_workflows.js`.
+
 # Estructura del Google Sheet
 
 Un solo spreadsheet: **"Compras Casa"**. Cinco hojas.
@@ -27,7 +37,7 @@ Fila 1 = headers exactos (n8n mapea por nombre de columna).
 | `fecha_compra` | fecha ISO | | Se llena con "ya compré". |
 | `veces_arrastrado` | número | `0` | Cuántos ciclos viene sin comprarse. |
 | `origen` | texto | `mensaje` | `mensaje \| arrastre` |
-| `wamid_origen` | texto | `wamid.HBgN...` | Trazabilidad al mensaje original. |
+| `msg_origen` | texto | `4821` | `update_id` de Telegram, para trazar el mensaje original. |
 
 **Cómo marcar comprado — tres caminos, los tres funcionan:**
 
@@ -78,8 +88,9 @@ todos los meses y qué pediste una sola vez en tu vida.
 | `frecuencia` | `14` |
 | `ultima_vez` | `2026-09-02` |
 
-Se llena sola (nodo 19 del doc 02). Es lo que hace que el bot deduplique cada
-vez mejor sin tocar el prompt. Podés sembrarla a mano con 30 ítems que sabés que
+Hoy se siembra con `tools/build_sheet.py` (56 ítems) y se mantiene a mano.
+Es lo que hace que el bot deduplique cada vez mejor sin tocar el prompt.
+Auto-alimentarla está en "Lo que falta" del README. Podés sembrarla a mano con 30 ítems que sabés que
 compran siempre y el bot arranca afinado desde el día 1.
 
 ---
@@ -91,17 +102,16 @@ Dos columnas: `clave` | `valor`.
 | clave | valor |
 |---|---|
 | `ciclo_activo` | `2026-10` |
-| `persona_1_numero` | `5491122334455` |
+| `telegram_bot_token` | `8123456789:AAH...` |
+| `grupo_chat_id` | `-1001234567890` |
+| `persona_1_user_id` | `111222333` |
 | `persona_1_nombre` | `Lisandro` |
-| `persona_2_numero` | `5491199887766` |
+| `persona_2_user_id` | `444555666` |
 | `persona_2_nombre` | `Flor` |
-| `ultimo_inbound_5491122334455` | `2026-09-13T14:22:10Z` |
-| `ultimo_inbound_5491199887766` | `2026-09-12T20:05:44Z` |
-| `envio_pendiente_5491122334455` | `false` |
-| `envio_pendiente_5491199887766` | `false` |
-| `ultimo_mensaje_mensual` | *(texto completo de la última lista)* |
 | `max_arrastres` | `3` |
 | `categorias` | `almacén,lácteos,limpieza,higiene,bebidas,frescos,otros` |
+| `usar_ia` | `true` |
+| `umbral_confianza` | `0.4` |
 
 Tener esto en la hoja y no hardcodeado en n8n significa que cambiás un número de
 teléfono sin abrir el editor de workflows.
@@ -116,7 +126,7 @@ teléfono sin abrir el editor de workflows.
 | Columna | Para qué |
 |---|---|
 | `ts` | Timestamp del procesamiento. |
-| `wamid` | **Clave de idempotencia.** Si ya está, el mensaje se ignora. |
+| `update_id` | El id del update de Telegram, para trazar. |
 | `from` | Número. |
 | `tipo` | `text \| audio \| image \| ...` |
 | `texto` | El mensaje crudo (o la transcripción). |

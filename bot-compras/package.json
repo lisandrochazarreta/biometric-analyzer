@@ -1,0 +1,14 @@
+{
+  "name": "bot-compras",
+  "version": "1.0.0",
+  "description": "Bot de lista de compras por Telegram (n8n + Google Sheets)",
+  "private": true,
+  "scripts": {
+    "test": "node --test 'test/*.test.js'",
+    "e2e": "node test/e2e.js",
+    "sim": "node test/simulacion.js",
+    "build": "node tools/build_workflows.js",
+    "validate": "node tools/validar_workflows.js",
+    "check": "npm test && npm run e2e && npm run build && npm run validate"
+  }
+}

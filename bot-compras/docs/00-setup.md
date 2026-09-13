@@ -1,0 +1,207 @@
+# Setup — de cero a andando
+
+Tiempo real: **~25 minutos**, casi todo copiar y pegar. Seguí el orden.
+
+---
+
+## 0. Lo que ya está hecho
+
+- ✅ El Google Sheet **[Compras Casa](https://docs.google.com/spreadsheets/d/1Boax5fBBasvYdIy2AEmVhaNonSUGq1jB0IvMbxdEDfA/edit)**
+  está creado en tu Drive, con las 5 hojas y el catálogo sembrado con 56 ítems.
+- ✅ Los 3 workflows están generados en `workflows/*.json`, listos para importar.
+- ✅ La lógica está testeada (`npm run check`).
+
+Falta lo que necesita ser vos: crear el bot, pegar credenciales, importar.
+
+---
+
+## 1. Crear el bot en Telegram — 2 min
+
+En Telegram, hablale a **@BotFather**:
+
+```
+/newbot
+→ nombre:    Compras Casa
+→ usuario:   compras_casa_lisandro_bot     (tiene que terminar en "bot")
+```
+
+Te devuelve un token tipo `8123456789:AAH...`. **Guardalo**, va en el paso 3.
+
+Después, **en el mismo chat con BotFather**, el paso que la gente saltea y hace
+que el bot parezca roto:
+
+```
+/setprivacy
+→ elegí tu bot
+→ Disable
+```
+
+Sin esto, **en un grupo el bot solo recibe mensajes que empiezan con `/`**.
+Escribís "leche" y no pasa nada. Es el error nº 1 de los bots de Telegram.
+
+Opcional pero lindo: `/setcommands` y pegá
+
+```
+lista - Ver lo que hay anotado
+borrar - Sacar un ítem
+ayuda - Cómo usarme
+deshacer - Revertir mi último cambio
+```
+
+---
+
+## 2. Armar el grupo — 1 min
+
+1. Creá un grupo de Telegram con tu novia.
+2. Agregá al bot al grupo.
+3. Escribí cualquier cosa en el grupo.
+
+Ahora necesitás **3 números**: el `chat_id` del grupo y los `user_id` de cada uno.
+Abrí en el navegador (reemplazando `<TOKEN>`):
+
+```
+https://api.telegram.org/bot<TOKEN>/getUpdates
+```
+
+Buscá en el JSON:
+- `"chat":{"id":-1001234567890,...}` → ese negativo es **`grupo_chat_id`**.
+- `"from":{"id":111222333,...}` → el **`user_id`** de quien escribió.
+
+Que escriban los dos y refrescá para tener ambos ids.
+
+> Si `getUpdates` viene vacío: todavía no escribieron en el grupo, o ya hay un
+> webhook activo consumiendo los updates. En ese segundo caso,
+> `https://api.telegram.org/bot<TOKEN>/deleteWebhook` y probá de nuevo.
+
+---
+
+## 3. Completar la hoja `Config` — 3 min
+
+En el Sheet, pestaña **Config**, completá las filas marcadas en naranja:
+
+| clave | valor |
+|---|---|
+| `grupo_chat_id` | `-1001234567890` |
+| `persona_1_user_id` | tu id |
+| `persona_1_nombre` | Lisandro |
+| `persona_2_user_id` | el id de ella |
+| `persona_2_nombre` | su nombre |
+| `ciclo_activo` | el mes en que van a comprar, ej `2026-10` |
+
+Y **agregá una fila nueva**:
+
+| clave | valor |
+|---|---|
+| `telegram_bot_token` | `8123456789:AAH...` |
+
+> **Por qué el token va en el Sheet y no en una credencial de n8n:** los teclados
+> inline son de largo variable, y el nodo nativo de Telegram los define como
+> configuración estática — no se pueden armar en runtime. Así que los mensajes
+> salen por `HTTP Request`, y la API de Telegram solo acepta el token en la URL.
+> Ponerlo en `Config` lo mantiene fuera del JSON del workflow y fuera de git.
+> El Sheet es privado, igual que tus credenciales de n8n. Si preferís, podés
+> hardcodearlo en los 4 nodos HTTP que arman la URL.
+
+---
+
+## 4. Credenciales en n8n — 5 min
+
+Tres, y solo la primera tiene vuelta:
+
+1. **Google Sheets OAuth2** (`googleSheetsOAuth2Api`) — con tu cuenta de
+   Workspace. Es la que usan todos los nodos de Sheets vía HTTP Request.
+   Si nunca la creaste en este n8n: necesitás un proyecto en Google Cloud con
+   la Sheets API habilitada y un OAuth Client ID (Web), con la redirect URI que
+   te muestra n8n. Es el paso más largo de todo el setup.
+2. **Telegram** (`telegramApi`) — el token del paso 1. La usa el Telegram Trigger.
+3. **Header Auth** (`httpHeaderAuth`) × 2:
+   - `Gemini API Key` → Name: `x-goog-api-key`, Value: tu key de
+     [Google AI Studio](https://aistudio.google.com/apikey) (free tier).
+   - `Groq API Key` → Name: `Authorization`, Value: `Bearer gsk_...` de
+     [console.groq.com](https://console.groq.com) (free tier). Solo si querés audios.
+
+---
+
+## 5. Importar los workflows — 2 min
+
+En n8n: **Workflows → ⋯ → Import from File**, uno por uno:
+
+| Archivo | Qué hace |
+|---|---|
+| `workflows/compras-ingesta.json` | Recibe mensajes. 17 nodos. |
+| `workflows/compras-mensual.json` | Cron del día 1. 9 nodos. |
+| `workflows/compras-errores.json` | Te avisa si algo falla. 4 nodos. |
+
+Después de importar, **asigná las credenciales** (n8n las marca en rojo):
+
+- Todos los nodos HTTP que apuntan a `sheets.googleapis.com` → *Google Sheets OAuth2*
+- `Telegram Trigger` → *Telegram*
+- `Gemini` → *Header Auth: Gemini API Key*
+- `Transcribir (Groq Whisper)` → *Header Auth: Groq API Key*
+
+Los nodos que apuntan a `api.telegram.org` **no llevan credencial**: el token
+viene de `Config`.
+
+Por último, en `compras-ingesta` y `compras-mensual`:
+**Settings → Error Workflow → `compras-errores`**.
+
+---
+
+## 6. Prender y probar — 3 min
+
+1. Activá `compras-ingesta` (toggle arriba a la derecha).
+2. En el grupo escribí: **`ayuda`**
+
+Si responde el texto de ayuda, el camino completo funciona: Telegram → n8n →
+Sheets → Telegram.
+
+Después probá esta secuencia, que ejercita todo:
+
+| Escribís | Esperás |
+|---|---|
+| `leche` | "✅ Anoté: Leche" y una fila nueva en la hoja |
+| `papel higiénico x2` | "✅ Anoté: Papel higiénico x2" |
+| `2 litros de leche` | "🔁 Ya estaban, sumé: Leche → ahora 3" (no una fila nueva) |
+| `detergente y esponjas` | dos ítems de una |
+| `lista` | la lista agrupada, con un ✅ por ítem |
+| *(tocás un ✅)* | el ítem queda `comprado` en la hoja |
+| `borrar leche` | "🗑️ Saqué Leche" |
+| `jajaja` | "No pude sacar ítems de eso 🤔" |
+| `hilo dental` | acá recién se llama a Gemini |
+
+3. Activá `compras-mensual`. Para probarlo sin esperar al día 1, cambiá el cron
+   a `*/5 * * * *`, mirá que llegue el mensaje, y **volvelo a `0 9 1 * *`**.
+
+---
+
+## 7. Cuando algo no anda
+
+| Síntoma | Causa casi segura |
+|---|---|
+| El bot no reacciona en el grupo | Privacy mode. Volvé al paso 1: `/setprivacy` → Disable, y **sacá y volvé a agregar el bot al grupo**. |
+| Reacciona a `/lista` pero no a `lista` | Lo mismo. |
+| "Ese ítem ya estaba marcado" siempre | El `chat_id` o los `user_id` de `Config` no coinciden. Revisá `getUpdates`. |
+| No responde nada, ni error | El remitente no está en la allowlist: es silencio a propósito. Mirá la ejecución en n8n. |
+| `401` en los nodos de Sheets | La credencial de Google no tiene la Sheets API habilitada. |
+| `400 Bad Request: chat not found` | El token de `Config` tiene un espacio o le falta un pedazo. |
+| `parse_mode` error de Telegram | Un ítem tiene `<` o `&` en el nombre. Es un bug: avisame y lo escapo. |
+
+Los tres workflows escriben en la pestaña `Log` del Sheet. Filtrá por
+`resultado != ok` y ahí está todo lo que el bot no supo hacer.
+
+---
+
+## 8. Costo real
+
+| Componente | Costo |
+|---|---|
+| Telegram | USD 0 — sin límite, sin ventana de 24 h, sin templates |
+| Gemini Flash (free tier) | USD 0 — y solo se llama cuando el diccionario falla |
+| Groq Whisper (free tier) | USD 0 |
+| Google Sheets | USD 0 |
+| n8n | ya lo estás pagando |
+| **Total** | **USD 0.00 / mes** |
+
+Si algún día te pasás del free tier de Gemini, poné `usar_ia = false` en `Config`
+y el bot sigue andando solo con el diccionario. No se rompe nada: los mensajes
+que no entienda te los devuelve para que los escribas más simple.

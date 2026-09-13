@@ -1,0 +1,282 @@
+[
+ {
+  "item_canonico": "Leche",
+  "categoria": "lácteos",
+  "alias": "leche,lechee,leche entera,leche descremada,litro de leche,la leche"
+ },
+ {
+  "item_canonico": "Yogur",
+  "categoria": "lácteos",
+  "alias": "yogur,yoghurt,yogures,yogurt"
+ },
+ {
+  "item_canonico": "Queso",
+  "categoria": "lácteos",
+  "alias": "queso,queso cremoso,cremoso,queso de maquina,port salut"
+ },
+ {
+  "item_canonico": "Queso rallado",
+  "categoria": "lácteos",
+  "alias": "rallado,queso rallado,parmesano"
+ },
+ {
+  "item_canonico": "Manteca",
+  "categoria": "lácteos",
+  "alias": "manteca"
+ },
+ {
+  "item_canonico": "Crema",
+  "categoria": "lácteos",
+  "alias": "crema,crema de leche"
+ },
+ {
+  "item_canonico": "Dulce de leche",
+  "categoria": "lácteos",
+  "alias": "dulce de leche,ddl,dulce"
+ },
+ {
+  "item_canonico": "Café",
+  "categoria": "almacén",
+  "alias": "cafe,café,cafe molido,cafe instantaneo,nescafe"
+ },
+ {
+  "item_canonico": "Yerba",
+  "categoria": "almacén",
+  "alias": "yerba,yerba mate,la yerba"
+ },
+ {
+  "item_canonico": "Té",
+  "categoria": "almacén",
+  "alias": "te,té,saquitos de te"
+ },
+ {
+  "item_canonico": "Azúcar",
+  "categoria": "almacén",
+  "alias": "azucar,azúcar"
+ },
+ {
+  "item_canonico": "Harina",
+  "categoria": "almacén",
+  "alias": "harina,harina 000,harina leudante"
+ },
+ {
+  "item_canonico": "Fideos",
+  "categoria": "almacén",
+  "alias": "fideos,pasta,tallarines,mostachol,tirabuzon,spaghetti"
+ },
+ {
+  "item_canonico": "Arroz",
+  "categoria": "almacén",
+  "alias": "arroz"
+ },
+ {
+  "item_canonico": "Aceite",
+  "categoria": "almacén",
+  "alias": "aceite,aceite de girasol,aceite de oliva"
+ },
+ {
+  "item_canonico": "Vinagre",
+  "categoria": "almacén",
+  "alias": "vinagre"
+ },
+ {
+  "item_canonico": "Sal",
+  "categoria": "almacén",
+  "alias": "sal,sal fina,sal gruesa"
+ },
+ {
+  "item_canonico": "Puré de tomate",
+  "categoria": "almacén",
+  "alias": "pure de tomate,puré de tomate,salsa de tomate,tomate triturado"
+ },
+ {
+  "item_canonico": "Atún",
+  "categoria": "almacén",
+  "alias": "atun,atún,lata de atun"
+ },
+ {
+  "item_canonico": "Galletitas",
+  "categoria": "almacén",
+  "alias": "galletitas,galletas,criollitas,vainillas"
+ },
+ {
+  "item_canonico": "Mermelada",
+  "categoria": "almacén",
+  "alias": "mermelada,dulce de frutilla"
+ },
+ {
+  "item_canonico": "Polenta",
+  "categoria": "almacén",
+  "alias": "polenta"
+ },
+ {
+  "item_canonico": "Lentejas",
+  "categoria": "almacén",
+  "alias": "lentejas,legumbres,garbanzos"
+ },
+ {
+  "item_canonico": "Detergente",
+  "categoria": "limpieza",
+  "alias": "detergente,deter,detergente para los platos,magistral"
+ },
+ {
+  "item_canonico": "Lavandina",
+  "categoria": "limpieza",
+  "alias": "lavandina,ayudin,cloro"
+ },
+ {
+  "item_canonico": "Jabón en polvo",
+  "categoria": "limpieza",
+  "alias": "jabon en polvo,jabón en polvo,skip,ala,jabon para la ropa"
+ },
+ {
+  "item_canonico": "Suavizante",
+  "categoria": "limpieza",
+  "alias": "suavizante,vivere,comfort"
+ },
+ {
+  "item_canonico": "Esponjas",
+  "categoria": "limpieza",
+  "alias": "esponjas,esponja,virulana"
+ },
+ {
+  "item_canonico": "Trapo de piso",
+  "categoria": "limpieza",
+  "alias": "trapo,trapo de piso,trapos"
+ },
+ {
+  "item_canonico": "Limpiavidrios",
+  "categoria": "limpieza",
+  "alias": "limpiavidrios,cif vidrios"
+ },
+ {
+  "item_canonico": "Bolsas de residuo",
+  "categoria": "limpieza",
+  "alias": "bolsas,bolsas de residuo,bolsas de basura,bolsas de consorcio"
+ },
+ {
+  "item_canonico": "Papel de cocina",
+  "categoria": "limpieza",
+  "alias": "papel de cocina,rollo de cocina,servilletas"
+ },
+ {
+  "item_canonico": "Papel higiénico",
+  "categoria": "higiene",
+  "alias": "papel higienico,papel higiénico,papel,papel h,rollos,higienico"
+ },
+ {
+  "item_canonico": "Shampoo",
+  "categoria": "higiene",
+  "alias": "shampoo,champu,champú,shampu"
+ },
+ {
+  "item_canonico": "Acondicionador",
+  "categoria": "higiene",
+  "alias": "acondicionador,enjuague"
+ },
+ {
+  "item_canonico": "Jabón de tocador",
+  "categoria": "higiene",
+  "alias": "jabon de tocador,jabon blanco,jaboncito,jabon de manos"
+ },
+ {
+  "item_canonico": "Pasta de dientes",
+  "categoria": "higiene",
+  "alias": "pasta de dientes,dentifrico,colgate,pasta dental"
+ },
+ {
+  "item_canonico": "Desodorante",
+  "categoria": "higiene",
+  "alias": "desodorante,deo,rexona"
+ },
+ {
+  "item_canonico": "Maquinitas de afeitar",
+  "categoria": "higiene",
+  "alias": "maquinitas,gillette,maquinita de afeitar"
+ },
+ {
+  "item_canonico": "Agua",
+  "categoria": "bebidas",
+  "alias": "agua,agua mineral,bidon de agua,agua sin gas"
+ },
+ {
+  "item_canonico": "Gaseosa",
+  "categoria": "bebidas",
+  "alias": "gaseosa,coca,coca cola,sprite,seven up"
+ },
+ {
+  "item_canonico": "Cerveza",
+  "categoria": "bebidas",
+  "alias": "cerveza,birra,porron,porrones"
+ },
+ {
+  "item_canonico": "Vino",
+  "categoria": "bebidas",
+  "alias": "vino,vino tinto,malbec"
+ },
+ {
+  "item_canonico": "Fernet",
+  "categoria": "bebidas",
+  "alias": "fernet,branca"
+ },
+ {
+  "item_canonico": "Jugo",
+  "categoria": "bebidas",
+  "alias": "jugo,jugo de naranja,exprimido"
+ },
+ {
+  "item_canonico": "Soda",
+  "categoria": "bebidas",
+  "alias": "soda,sifon"
+ },
+ {
+  "item_canonico": "Huevos",
+  "categoria": "frescos",
+  "alias": "huevos,huevo,docena de huevos,maple de huevos"
+ },
+ {
+  "item_canonico": "Pan",
+  "categoria": "frescos",
+  "alias": "pan,pan lactal,pan de mesa,flautita"
+ },
+ {
+  "item_canonico": "Pollo",
+  "categoria": "frescos",
+  "alias": "pollo,pechuga,pata muslo"
+ },
+ {
+  "item_canonico": "Carne",
+  "categoria": "frescos",
+  "alias": "carne,carne picada,milanesas,nalga,bife"
+ },
+ {
+  "item_canonico": "Verduras",
+  "categoria": "frescos",
+  "alias": "verduras,verdura,lechuga,tomate,cebolla,papa,zanahoria"
+ },
+ {
+  "item_canonico": "Frutas",
+  "categoria": "frescos",
+  "alias": "frutas,fruta,banana,manzana,naranja,limon"
+ },
+ {
+  "item_canonico": "Fiambre",
+  "categoria": "frescos",
+  "alias": "fiambre,jamon,jamón,salame,queso y jamon"
+ },
+ {
+  "item_canonico": "Pilas",
+  "categoria": "otros",
+  "alias": "pilas,pila,baterias,pilas AA"
+ },
+ {
+  "item_canonico": "Lamparitas",
+  "categoria": "otros",
+  "alias": "lamparitas,lamparita,foco,bombita"
+ },
+ {
+  "item_canonico": "Comida para gato",
+  "categoria": "otros",
+  "alias": "comida de gato,comida para gato,alimento para gato,whiskas"
+ }
+]

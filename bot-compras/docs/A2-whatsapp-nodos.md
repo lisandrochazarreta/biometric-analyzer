@@ -1,3 +1,8 @@
+> **Archivado.** Este es el diseño para WhatsApp, que se descartó a favor de
+> Telegram (ver [`01-arquitectura.md`](01-arquitectura.md) § Decisión 1). Queda
+> como registro de la comparación y por si algún día el número deja de ser un
+> problema. **No describe lo que está implementado.**
+
 # Workflow 1 — `compras-ingesta` (nodo por nodo)
 
 Trigger: webhook de WhatsApp. Corre una vez por mensaje entrante.

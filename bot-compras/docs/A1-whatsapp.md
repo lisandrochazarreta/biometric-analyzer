@@ -1,3 +1,8 @@
+> **Archivado.** Este es el diseño para WhatsApp, que se descartó a favor de
+> Telegram (ver [`01-arquitectura.md`](01-arquitectura.md) § Decisión 1). Queda
+> como registro de la comparación y por si algún día el número deja de ser un
+> problema. **No describe lo que está implementado.**
+
 # Bot de lista de compras por WhatsApp — Arquitectura y decisiones
 
 Objetivo: dos personas escriben ítems sueltos por WhatsApp durante todo el mes;

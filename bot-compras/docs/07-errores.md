@@ -1,3 +1,7 @@
+> **Actualizado para Telegram.** Varias secciones eran específicas de WhatsApp
+> (eventos de estado, `wamid`, media de Meta) y se reescribieron. La versión
+> original está en el historial de git.
+
 # Manejo de errores y casos borde
 
 Ordenado por probabilidad de que te pase.
@@ -9,7 +13,7 @@ Ordenado por probabilidad de que te pase.
 "jajaja", "ok", "te amo", "compraste?", un sticker con texto, un emoji suelto.
 
 - El prompt (regla 15) devuelve `tipo: "no_entendido"`.
-- El validador (nodo 16) también lo captura si `items` viene vacío.
+- `validarItems()` también lo captura si `items` viene vacío.
 - **Respuesta**: *"No pude sacar ítems de eso 🤔 Escribí *ayuda* para ver qué
   entiendo."*
 - **Siempre respondé algo.** El silencio es indistinguible de "el bot está
@@ -17,10 +21,14 @@ Ordenado por probabilidad de que te pase.
 - Loguealo con `resultado = no_entendido`. Si en un mes ves 10 mensajes ahí que
   **sí** eran ítems, agregalos como ejemplos al prompt.
 
-**Anti-loop crítico**: el webhook de Meta dispara también con eventos de estado
-(`sent`, `delivered`, `read`) de tus propios mensajes. Si el nodo 2 no los
-filtra (`if (!msg) continue`), el bot se responde a sí mismo hasta que Meta te
-rate-limitee. Es el bug número uno de este tipo de flujo.
+**En Telegram esto no pasa**: el bot no recibe eventos de estado de sus propios
+mensajes, y por defecto tampoco recibe lo que mandan otros bots. El equivalente
+del bug de loop era de WhatsApp.
+
+Lo que **sí** te va a pasar en Telegram, y no es un error del código: si no
+desactivaste el *privacy mode* en BotFather, en un grupo el bot solo recibe los
+mensajes que empiezan con `/`. Parece caído pero está sano. Ver
+[`00-setup.md`](00-setup.md) § 1.
 
 ---
 
@@ -35,15 +43,15 @@ Respuesta: *"🔁 Leche ya estaba, ahora van 2"*.
 **b) Duplicado exacto en el mismo mensaje** — "café y café molido".
 Regla 14 del prompt: se devuelve una vez sumando cantidades.
 
-**c) Duplicado técnico** — Meta **reintenta el webhook** si no le respondés 200
-en ~20 segundos, y tu flujo con LLM + 5 llamadas a Sheets puede tardar eso.
-Sin protección, cada ítem entra dos veces.
-Solución: el chequeo de `wamid` contra la hoja `Log` (nodos 4-5 del doc 02).
-**No lo saltees**, es el error que más va a ensuciar la hoja en producción.
+**c) Duplicado técnico** — Telegram reintenta la entrega de un update si el
+webhook no devuelve 200. El riesgo es mucho menor que en WhatsApp (el flujo hace
+1 lectura + 2 escrituras y responde antes de escribir), pero existe si n8n queda
+muy lento.
 
-Si querés blindarlo más: activá *Respond Immediately* en el trigger para
-devolver 200 apenas llega, y seguí procesando. n8n lo hace por defecto en el
-WhatsApp Trigger, pero verificalo.
+El `update_id` se guarda en la columna `msg_origen` de cada fila, así que un
+duplicado es **visible y rastreable**. Si algún día te pasa seguido, el arreglo
+es agregar un gate en `Preparar` que corte cuando ya exista una fila con ese
+`update_id` — la lista ya está leída en memoria, no cuesta una llamada extra.
 
 ---
 
@@ -53,23 +61,26 @@ WhatsApp Trigger, pero verificalo.
 los "se terminó X" salen mientras tenés las manos ocupadas en la cocina — que es
 exactamente cuando te acordás de que falta algo.
 
-Flujo (doc 02, §6b):
+Flujo (nodos 13-17 de `compras-ingesta`):
 
 ```
-audio.id → GET graph.facebook.com/v21.0/{id}   (con Bearer token) → { url }
-         → GET {url}                            (con Bearer token) → binario .ogg
-         → POST api.openai.com/v1/audio/transcriptions
-           model=whisper-1, language=es, file=<binario>
-         → texto → sigue el flujo normal
+voice.file_id → GET api.telegram.org/bot<token>/getFile   → { file_path }
+              → GET api.telegram.org/file/bot<token>/<path> → binario .ogg
+              → POST api.groq.com/openai/v1/audio/transcriptions
+                model=whisper-large-v3-turbo, language=es
+              → texto → sigue el flujo normal
 ```
 
 Detalles que importan:
-- La URL que devuelve Meta **expira en ~5 minutos** y **exige el header de
-  autorización** también en la descarga. Si la pedís sin token, 401.
-- WhatsApp manda **OGG/Opus**. Whisper lo acepta nativo, no hace falta convertir.
+- Telegram sirve el archivo en un host distinto (`/file/bot<token>/`), sin
+  header de auth: el token va en la URL. Es más simple que el flujo de Meta.
+- `getFile` funciona para archivos de hasta 20 MB. Una nota de voz nunca se
+  acerca.
+- Telegram manda **OGG/Opus**. Whisper lo acepta nativo, no hace falta convertir.
 - El parámetro `prompt` de Whisper mejora muchísimo el reconocimiento de
-  productos locales. Usá: *"Lista de compras de supermercado en Argentina:
-  leche, yerba, fideos, lavandina, papel higiénico, fernet."*
+  productos locales. Ya va puesto: *"Lista de compras de supermercado en
+  Argentina: leche, yerba, fideos, lavandina, papel higiénico, fernet."*
+- Groq tiene free tier para Whisper, así que los audios también salen **USD 0**.
 - **Confirmá siempre lo que entendiste**: *"🎤 Entendí: 'leche y yerba' →
   Anoté: Leche · Yerba"*. Si transcribió mal, lo ven al instante y usan
   `deshacer`.
@@ -103,7 +114,7 @@ Whisper. Lo dejaría para la versión 2: la tasa de error es alta y corregir 12
 - `Structured Output Parser` con **Auto-fix activado**: reintenta una vez
   pasándole el error de validación.
 - Nodo LLM con `Retry on Fail = true`, `Max tries = 2`.
-- Si igual falla: el validador (nodo 16) devuelve `ok: false` y el bot responde
+- Si igual falla: `validarItems()` devuelve una lista vacía y el bot responde
   *"Se me trabó el cerebro con ese mensaje 🤖 ¿Me lo escribís más simple?
   (ej: 'leche x2')"*, y se loguea con `resultado = error` + el raw del modelo.
 - **No escribas nunca en `Lista` una salida que no pasó el validador.** Una fila
@@ -112,14 +123,15 @@ Whisper. Lo dejaría para la versión 2: la tasa de error es alta y corregir 12
 
 ---
 
-## 6. Números desconocidos
+## 6. Gente desconocida
 
 Alguien equivocado, spam, o un bot de marketing que scrapeó el número.
 
-- El `If` "Remitente permitido" (nodo 3) corta.
-- **No respondas.** Loguealo con `resultado = rechazado` y listo. Responder
-  confirma que el número está activo.
-- Si ves muchos, el número se filtró: Meta deja bloquear en el panel.
+- La allowlist en `Preparar` devuelve `[]` y corta.
+- **No respondas.** Responder confirma que el bot existe y está vivo.
+- En Telegram el riesgo es bajo: para escribirle a tu bot hay que saber su
+  usuario exacto. Si igual te pasa, `/setjoingroups Disable` en BotFather evita
+  que lo agreguen a otros grupos.
 
 ---
 
@@ -127,14 +139,14 @@ Alguien equivocado, spam, o un bot de marketing que scrapeó el número.
 
 | Falla | Síntoma | Qué hacer |
 |---|---|---|
-| Token de Meta vencido | 401 en todos los envíos | Usá **System User token permanente**, no el de prueba (dura 24 h). Es el error que más veces mata este flujo. |
+| Token de Telegram mal copiado | `400 chat not found` o `401` | El token va en `Config.telegram_bot_token`, sin espacios. Los tokens de Telegram no vencen. |
 | Sheets 429 | `Rate limit exceeded` | `Retry on Fail` + `Wait between tries = 3000 ms` en los nodos de Sheets. |
-| n8n caído | Nadie recibe nada | Meta reintenta el webhook ~5 veces durante varias horas. Si n8n vuelve en ese lapso, los mensajes llegan (y el chequeo de `wamid` evita duplicar). Si no, se pierden. |
-| Certificado vencido | Meta deja de mandar webhooks, silenciosamente | Renovación automática (Caddy / Let's Encrypt) + el check de salud de abajo. |
+| n8n caído | Nadie recibe nada | Telegram reintenta un rato y después descarta. Si estuvo caído mucho, esos mensajes se perdieron: mirá la hoja y volvé a anotar. |
+| Certificado vencido | Telegram deja de mandar updates | Telegram **exige HTTPS con certificado válido** para webhooks. Renovación automática (Caddy / Let's Encrypt). |
 | Cron no dispara | No llega la lista el día 1 | Timezone del workflow en `America/Argentina/Buenos_Aires`. Verificá en *Executions* que corrió. |
 
-**Workflow de errores** (doc 02, workflow 3): `Error Trigger` → WhatsApp a tu
-número. Seteado como *Error Workflow* en los dos workflows principales.
+**Workflow de errores** (`compras-errores`): `Error Trigger` → Telegram a tu
+chat privado. Seteado como *Error Workflow* en los dos workflows principales.
 
 **Check de salud** (opcional, muy barato): un cron semanal que manda un mensaje
 al bot desde el propio n8n vía HTTP y verifica que la ejecución de ingesta
@@ -154,6 +166,10 @@ filas de "Leche".
   filas al LLM, que va a elegir una — pero la otra queda.
 - Arreglo real si te molesta: **Settings del workflow → Limit concurrent
   executions = 1**. Serializa todo. Con este volumen no vas a notar la latencia.
+- Ojo: esto importa más acá que en la versión WhatsApp, porque `Preparar`
+  calcula los números de fila a partir de una lectura previa. Si entran dos
+  mensajes en el mismo segundo, el segundo puede escribir sobre una fila
+  corrida. Con dos personas es improbable; si te preocupa, poné el límite en 1.
 
 ---
 

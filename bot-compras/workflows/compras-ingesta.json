@@ -1,0 +1,535 @@
+{
+  "name": "compras-ingesta",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "id": "n001",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -220,
+        300
+      ],
+      "webhookId": "compras-ingesta"
+    },
+    {
+      "parameters": {
+        "options": {},
+        "method": "GET",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/1Boax5fBBasvYdIy2AEmVhaNonSUGq1jB0IvMbxdEDfA/values:batchGet",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ranges",
+              "value": "Lista!A:O"
+            },
+            {
+              "name": "ranges",
+              "value": "Catalogo!A:E"
+            },
+            {
+              "name": "ranges",
+              "value": "Config!A:C"
+            },
+            {
+              "name": "majorDimension",
+              "value": "ROWS"
+            }
+          ]
+        }
+      },
+      "id": "n002",
+      "name": "Leer hojas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== lib/compras.js (generado por tools/build_workflows.js - no editar aca) =====\n/**\n * Logica pura del bot de lista de compras.\n *\n * Sin dependencias y sin I/O a proposito: todo lo que hay aca se testea en\n * bot-compras/test/ y despues se inyecta tal cual dentro de los Code nodes de\n * n8n (ver tools/build_workflows.js). Fuente unica de verdad.\n */\n\n// ---------------------------------------------------------------- constantes\n\nconst CATEGORIAS = ['almacén', 'lácteos', 'limpieza', 'higiene', 'bebidas', 'frescos', 'otros'];\nconst UNIDADES = ['u', 'kg', 'g', 'l', 'ml', 'paq', 'docena'];\n\n// Orden de recorrido del super, no alfabetico.\nconst ORDEN_CATEGORIAS = ['almacén', 'lácteos', 'frescos', 'limpieza', 'higiene', 'bebidas', 'otros'];\n\nconst EMOJI_CATEGORIA = {\n  'almacén': '🥫', 'lácteos': '🥛', 'frescos': '🥬',\n  'limpieza': '🧼', 'higiene': '🧴', 'bebidas': '🍷', 'otros': '📦',\n};\n\nconst MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',\n               'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];\n\n// Se sacan del principio del segmento antes de buscar el producto.\nconst PREFIJOS_RUIDO = [\n  'se nos termino', 'se nos acabo', 'se termino', 'se acabo', 'se acaba',\n  'hay que comprar', 'hay que traer', 'tenemos que comprar', 'acordate de',\n  'no hay mas', 'no queda mas', 'no hay', 'no queda', 'nos falta', 'me falta',\n  'falta', 'faltan', 'comprar', 'compra', 'traer', 'trae', 'necesito',\n  'necesitamos', 'anota', 'anotar', 'agrega', 'agregar', 'sumar', 'poner',\n  'pone', 'agregame', 'anotame',\n];\n\nconst PALABRAS_RUIDO = ['de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'unos',\n                        'unas', 'mas', 'por', 'para', 'porfa', 'porfavor', 'favor', 'please'];\n\nconst NEGACIONES = [\n  /^no\\s+(compres|compremos|comprar)\\s+(mas\\s+)?(.+)$/,\n  /^(saca|sacar|saca(?:le)?)\\s+(.+)$/,\n  /^ya\\s+no\\s+(hace\\s+falta|necesitamos|necesito)\\s+(?:el\\s+|la\\s+|los\\s+|las\\s+)?(.+)$/,\n];\n\n// ------------------------------------------------------------ normalizacion\n\n/** minusculas, sin tildes, sin repeticiones de letras, espacios colapsados. */\nfunction norm(s) {\n  return String(s == null ? '' : s)\n    .toLowerCase()\n    .normalize('NFD').replace(/[̀-ͯ]/g, '')\n    .replace(/([^\\W\\d_])\\1{2,}/g, '$1')  // \"yerbaaa\" -> \"yerba\" (digitos NO)\n    .replace(/[^\\wáéíóúñ\\s,./-]/gi, ' ') // saca emojis; la coma se conserva\n                                          // porque separa items y argumentos\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\n/** Stem pobre pero suficiente para es-AR: solo para comparar, no para mostrar. */\nfunction stem(w) {\n  if (w.length > 4 && w.endsWith('es')) return w.slice(0, -2);\n  if (w.length > 3 && w.endsWith('s')) return w.slice(0, -1);\n  return w;\n}\n\nfunction tokens(s) {\n  return norm(s).split(' ')\n    .map(t => t.replace(/^[,.]+|[,.]+$/g, ''))\n    .filter(t => t && !PALABRAS_RUIDO.includes(t));\n}\n\nfunction clave(s) {\n  return tokens(s).map(stem).sort().join(' ');\n}\n\nfunction levenshtein(a, b) {\n  if (a === b) return 0;\n  if (!a.length) return b.length;\n  if (!b.length) return a.length;\n  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);\n  for (let i = 1; i <= a.length; i++) {\n    const cur = [i];\n    for (let j = 1; j <= b.length; j++) {\n      cur[j] = Math.min(\n        prev[j] + 1,\n        cur[j - 1] + 1,\n        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),\n      );\n    }\n    prev = cur;\n  }\n  return prev[b.length];\n}\n\nfunction similitud(a, b) {\n  const max = Math.max(a.length, b.length);\n  return max === 0 ? 1 : 1 - levenshtein(a, b) / max;\n}\n\n// ---------------------------------------------------------------- cantidades\n\nconst NUMEROS_PALABRA = {\n  un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6,\n  siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12,\n};\n\nconst UNIDAD_PALABRA = {\n  kilo: 'kg', kilos: 'kg', kg: 'kg', k: 'kg',\n  gramo: 'g', gramos: 'g', g: 'g', gr: 'g',\n  litro: 'l', litros: 'l', l: 'l', lt: 'l', lts: 'l',\n  ml: 'ml', cc: 'ml',\n  paquete: 'paq', paquetes: 'paq', paq: 'paq', pack: 'paq', caja: 'paq', cajas: 'paq',\n  docena: 'docena', docenas: 'docena',\n};\n\n/**\n * Saca la cantidad del texto y devuelve el resto limpio.\n * @returns {{cantidad:number, unidad:string, resto:string}}\n */\nfunction parseCantidad(texto) {\n  let t = norm(texto);\n  let cantidad = null;\n  let unidad = 'u';\n\n  const quitar = (re, fn) => {\n    const m = t.match(re);\n    if (!m) return false;\n    fn(m);\n    t = (t.slice(0, m.index) + ' ' + t.slice(m.index + m[0].length)).replace(/\\s+/g, ' ').trim();\n    return true;\n  };\n\n  // \"media docena\" / \"docena\" -> 6 / 12\n  quitar(/\\b(media|medias)\\s+docenas?\\b/, () => { cantidad = 6; })\n    || quitar(/\\b(una\\s+)?docenas?\\b/, () => { cantidad = 12; })\n    // \"medio kilo\" / \"media caja\"\n    || quitar(/\\b(medio|media)\\s+(kilos?|litros?|paquetes?|cajas?)\\b/, (m) => {\n         cantidad = 0.5; unidad = UNIDAD_PALABRA[m[2]] || 'u';\n       })\n    // \"un par de\" (el \"un\" puede venir ya comido por limpiarPrefijos)\n    || quitar(/\\b(?:un\\s+)?par\\b/, () => { cantidad = 2; })\n    // \"2 kg\" / \"3 litros\" / \"2 paquetes\"\n    || quitar(/\\b(\\d+(?:[.,]\\d+)?)\\s*(kilos?|kg|k|gramos?|gr?|litros?|lts?|l|ml|cc|paquetes?|paq|pack|cajas?|docenas?)\\b/,\n         (m) => { cantidad = parseFloat(m[1].replace(',', '.')); unidad = UNIDAD_PALABRA[m[2]] || 'u'; })\n    // \"dos litros\"\n    || quitar(new RegExp(`\\\\b(${Object.keys(NUMEROS_PALABRA).join('|')})\\\\s+(kilos?|litros?|paquetes?|cajas?)\\\\b`),\n         (m) => { cantidad = NUMEROS_PALABRA[m[1]]; unidad = UNIDAD_PALABRA[m[2]] || 'u'; })\n    // \"x2\" / \"X 2\" / \"*2\"\n    || quitar(/\\b[x*]\\s*(\\d+)\\b/, (m) => { cantidad = parseInt(m[1], 10); })\n    || quitar(/\\((\\d+)\\)/, (m) => { cantidad = parseInt(m[1], 10); })\n    // \"2 leches\" (numero suelto al principio)\n    || quitar(/^(\\d+)\\s+/, (m) => { cantidad = parseInt(m[1], 10); })\n    // \"dos leches\"\n    || quitar(new RegExp(`^(${Object.keys(NUMEROS_PALABRA).join('|')})\\\\s+`),\n         (m) => { cantidad = NUMEROS_PALABRA[m[1]]; });\n\n  if (cantidad == null) cantidad = 1;\n  if (!(cantidad > 0)) cantidad = 1;\n  cantidad = Math.min(cantidad, 99);\n\n  return { cantidad, unidad, resto: t };\n}\n\n// ------------------------------------------------------------------ catalogo\n\n/**\n * @param {string} texto\n * @param {Array<{item_canonico:string, categoria:string, alias:string}>} catalogo\n * @returns {{item:string, categoria:string, score:number, sobrante:string}|null}\n */\nfunction buscarEnCatalogo(texto, catalogo) {\n  const t = norm(texto);\n  if (!t) return null;\n  const tk = tokens(t);\n  const k = clave(t);\n  if (!tk.length) return null;\n\n  let mejor = null;\n  const considerar = (cand, score, usados) => {\n    if (score <= 0) return;\n    if (!mejor || score > mejor.score) {\n      const sobrante = tk.filter(x => !usados.has(stem(x))).join(' ');\n      mejor = { item: cand.item_canonico, categoria: cand.categoria, score, sobrante };\n    }\n  };\n\n  for (const c of catalogo) {\n    if (!c || !c.item_canonico) continue;\n    const variantes = [c.item_canonico, ...String(c.alias || '').split(',')]\n      .map(v => norm(v)).filter(Boolean);\n    // Todo lo que esta entrada sabe llamarse, para juzgar el sobrante.\n    const propios = new Set(variantes.flatMap(v => tokens(v)).map(stem));\n\n    for (const v of variantes) {\n      const vk = clave(v);\n      const vtk = tokens(v);\n      if (!vtk.length) continue;\n      const usados = new Set(vtk.map(stem));\n\n      if (vk === k) { considerar(c, 1.0, usados); continue; }        // igual\n\n      // Un alias corto (\"te\", \"ala\", \"deo\") solo vale si es el mensaje entero:\n      // si no, \"te amo\" se convierte en un pedido de te.\n      if (vtk.length === 1 && vtk[0].length <= 3) continue;\n\n      // el alias esta contenido entero en el mensaje (\"fideos x3 tirabuzon\")\n      const contenido = vtk.every(w => tk.some(x => stem(x) === stem(w)));\n      if (contenido) {\n        const sobra = tk.filter(x => !usados.has(stem(x)));\n\n        // Un alias generico de UNA palabra (\"papel\", \"leche\", \"queso\") con algo\n        // colgando es ambiguo: \"papel de aluminio\" no es papel higienico y\n        // \"leche de almendras\" no es leche. Solo se acepta si lo que sobra\n        // tambien es una forma de nombrar a este mismo item (\"fideos tirabuzon\").\n        if (vtk.length === 1 && sobra.length &&\n            !sobra.every(x => propios.has(stem(x)))) continue;\n\n        // cuanto mas sobra, menos confiable: una frase larga con una palabra\n        // suelta de producto es mejor que la lea el LLM.\n        considerar(c, 0.95 - 0.06 * sobra.length, usados);\n        continue;\n      }\n      // typo en un alias de una sola palabra\n      if (vtk.length === 1 && tk.length === 1) {\n        const s = similitud(stem(tk[0]), stem(vtk[0]));\n        if (s >= 0.8) considerar(c, 0.6 + (s - 0.8) * 1.5, usados);\n      }\n    }\n  }\n  return mejor;\n}\n\n// -------------------------------------------------------------- segmentacion\n\nfunction segmentar(texto) {\n  return norm(texto)\n    .split(/\\s*(?:,|;|\\/|\\+|\\n|\\by\\b|\\be\\b|\\btambien\\b)\\s*/)\n    .map(s => s.trim())\n    .filter(Boolean);\n}\n\nfunction limpiarPrefijos(seg) {\n  let s = norm(seg);\n  let cambio = true;\n  while (cambio) {\n    cambio = false;\n    for (const p of PREFIJOS_RUIDO) {\n      if (s === p) return '';\n      if (s.startsWith(p + ' ')) { s = s.slice(p.length + 1).trim(); cambio = true; break; }\n    }\n    const m = s.match(/^(el|la|los|las|un|una|unos|unas|de|del)\\s+(.+)$/);\n    if (m) { s = m[2]; cambio = true; }\n  }\n  return s;\n}\n\n// ------------------------------------------------------------------ comandos\n\nconst REGLAS_COMANDO = [\n  [/^(lista|ver lista|la lista|que hay|que tenemos|mostrar|mostrame la lista|pasame la lista)$/, 'lista'],\n  [/^(ayuda|help|comandos|start|\\?)$/, 'ayuda'],\n  [/^(deshacer|undo)$/, 'deshacer'],\n  [/^confirmar reset$/, 'reset_confirmado'],\n  [/^reset$/, 'reset'],\n  [/^(borrar|sacar|quitar|eliminar|cancelar)\\s+(.+)$/, 'borrar'],\n  [/^(ya compre|ya compramos|compre|compramos|ya esta|listo|ya fuimos)(?:\\s+(.+))?$/, 'comprado'],\n];\n\n/** @returns {{comando:string|null, argumento:string}} */\nfunction routerComandos(texto) {\n  const t = norm(texto).replace(/^\\//, '');   // /lista -> lista\n  for (const [re, nombre] of REGLAS_COMANDO) {\n    const m = t.match(re);\n    if (m) return { comando: nombre, argumento: (m[2] || '').trim() };\n  }\n  for (const re of NEGACIONES) {\n    const m = t.match(re);\n    if (m) return { comando: 'borrar', argumento: (m[m.length - 1] || '').trim() };\n  }\n  return { comando: null, argumento: '' };\n}\n\n// -------------------------------------------------------- normalizador local\n\n/**\n * Intenta resolver el mensaje con el diccionario, sin IA.\n * @returns {{items:Array, sinResolver:Array<string>, resueltoTodo:boolean}}\n */\nfunction normalizarLocal(texto, catalogo, opts = {}) {\n  const umbral = opts.umbral == null ? 0.75 : opts.umbral;\n  const items = [];\n  const sinResolver = [];\n\n  for (const seg of segmentar(texto)) {\n    const limpio = limpiarPrefijos(seg);\n    if (!limpio) continue;\n\n    const { cantidad, unidad, resto } = parseCantidad(limpio);\n    const base = limpiarPrefijos(resto);\n    if (!base) { sinResolver.push(seg); continue; }\n\n    const hit = buscarEnCatalogo(base, catalogo);\n    if (hit && hit.score >= umbral) {\n      items.push({\n        item: hit.item,\n        cantidad,\n        unidad,\n        categoria: CATEGORIAS.includes(hit.categoria) ? hit.categoria : 'otros',\n        nota: hit.sobrante || null,\n        texto_original: seg,\n        confianza: Math.min(0.99, hit.score),\n        fuente: 'diccionario',\n      });\n    } else {\n      sinResolver.push(seg);\n    }\n  }\n\n  return { items: fusionarDuplicados(items), sinResolver, resueltoTodo: sinResolver.length === 0 };\n}\n\n/** \"cafe y cafe molido\" -> un solo item con la suma. */\nfunction fusionarDuplicados(items) {\n  const out = [];\n  for (const it of items) {\n    const ya = out.find(o => o.item === it.item);\n    if (ya) {\n      ya.cantidad = Math.min(99, ya.cantidad + it.cantidad);\n      if (it.nota && !ya.nota) ya.nota = it.nota;\n      ya.texto_original += ' | ' + it.texto_original;\n    } else {\n      out.push({ ...it });\n    }\n  }\n  return out;\n}\n\n// --------------------------------------------------------------- validacion\n\n/** Blinda cualquier salida (del LLM o del diccionario) antes de tocar el Sheet. */\nfunction validarItems(items, opts = {}) {\n  const umbral = opts.umbralConfianza == null ? 0.4 : opts.umbralConfianza;\n  if (!Array.isArray(items)) return [];\n  return items\n    .filter(i => i && typeof i.item === 'string' && norm(i.item).length >= 2)\n    .filter(i => (i.confianza == null ? 1 : Number(i.confianza)) >= umbral)\n    .slice(0, 15)\n    .map(i => {\n      let cant = Number(i.cantidad);\n      if (!Number.isFinite(cant) || cant <= 0) cant = 1;\n      return {\n        item: String(i.item).trim().slice(0, 60),\n        cantidad: Math.min(cant, 99),\n        unidad: UNIDADES.includes(i.unidad) ? i.unidad : 'u',\n        categoria: CATEGORIAS.includes(i.categoria) ? i.categoria : 'otros',\n        nota: i.nota ? String(i.nota).slice(0, 80) : null,\n        texto_original: String(i.texto_original || '').slice(0, 200),\n        confianza: i.confianza == null ? 1 : Number(i.confianza),\n        fuente: i.fuente || 'ia',\n      };\n    });\n}\n\n// ------------------------------------------------------ dedup contra la hoja\n\n/**\n * Decide, para cada item, si es fila nueva o suma a una existente.\n * @returns {{appends:Array, updates:Array}}\n */\nfunction planificarEscrituras(items, lista, ctx = {}) {\n  const pendientes = (lista || []).filter(r => r && r.estado === 'pendiente');\n  const appends = [];\n  const updates = [];\n\n  for (const it of items) {\n    const existente =\n      pendientes.find(r => norm(r.item) === norm(it.item)) ||\n      pendientes.find(r => clave(r.item) === clave(it.item));\n\n    if (existente) {\n      const ya = updates.find(u => u.id === existente.id);\n      const previa = ya ? ya.cantidad : Number(existente.cantidad) || 0;\n      const nueva = Math.min(99, previa + it.cantidad);\n      const variantes = [existente.variantes, it.texto_original]\n        .filter(Boolean).join(' | ').slice(0, 500);\n      const pedido = unirPersonas(existente.pedido_por, ctx.nombre);\n      if (ya) { ya.cantidad = nueva; ya.variantes = variantes; ya.pedido_por = pedido; }\n      else {\n        updates.push({\n          id: existente.id, item: existente.item, cantidad: nueva,\n          cantidad_previa: Number(existente.cantidad) || 0,\n          variantes, pedido_por: pedido,\n          nota: existente.nota || it.nota || '',\n        });\n      }\n    } else {\n      appends.push({\n        id: nuevoId(ctx.ahora, appends.length),\n        ciclo: ctx.ciclo || '',\n        item: it.item,\n        variantes: it.texto_original,\n        cantidad: it.cantidad,\n        unidad: it.unidad,\n        categoria: it.categoria,\n        pedido_por: ctx.nombre || '',\n        nota: it.nota || '',\n        fecha_alta: ctx.ahora || new Date().toISOString(),\n        estado: 'pendiente',\n        fecha_compra: '',\n        veces_arrastrado: 0,\n        origen: 'mensaje',\n        msg_origen: ctx.msgId || '',\n      });\n    }\n  }\n  return { appends, updates };\n}\n\nfunction unirPersonas(actual, nuevo) {\n  const set = new Set(String(actual || '').split(',').map(s => s.trim()).filter(Boolean));\n  if (nuevo) set.add(String(nuevo).trim());\n  return [...set].join(', ');\n}\n\nfunction nuevoId(ahora, i) {\n  const base = ahora ? Date.parse(ahora) : Date.now();\n  return `${base}-${i}-${Math.random().toString(36).slice(2, 7)}`;\n}\n\n// ------------------------------------------------------------ borrar / match\n\n/**\n * Busca a que fila se refiere \"borrar X\". Nunca adivina si hay empate.\n * @returns {{estado:'ok'|'ambiguo'|'no_encontrado', filas:Array}}\n */\nfunction matchParaBorrar(query, lista) {\n  const pendientes = (lista || []).filter(r => r && r.estado === 'pendiente');\n  const q = norm(query);\n  if (!q) return { estado: 'no_encontrado', filas: [] };\n\n  const exactos = pendientes.filter(r => norm(r.item) === q || clave(r.item) === clave(q));\n  if (exactos.length === 1) return { estado: 'ok', filas: exactos };\n  if (exactos.length > 1) return { estado: 'ambiguo', filas: exactos };\n\n  const parciales = pendientes.filter(r => {\n    const ri = norm(r.item);\n    return ri.includes(q) || q.includes(ri) ||\n           norm(r.variantes || '').includes(q) ||\n           similitud(clave(r.item), clave(q)) >= 0.82;\n  });\n  if (parciales.length === 1) return { estado: 'ok', filas: parciales };\n  if (parciales.length > 1) return { estado: 'ambiguo', filas: parciales };\n  return { estado: 'no_encontrado', filas: [] };\n}\n\n// -------------------------------------------------------------------- ciclos\n\nfunction cicloAnterior(ciclo) {\n  const [y, m] = String(ciclo).split('-').map(Number);\n  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;\n}\n\nfunction cicloSiguiente(ciclo) {\n  const [y, m] = String(ciclo).split('-').map(Number);\n  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;\n}\n\nfunction nombreMes(ciclo) {\n  const m = Number(String(ciclo).split('-')[1]);\n  return MESES[m - 1] || '';\n}\n\n// --------------------------------------------------------------- consolidar\n\n/**\n * Cierre mensual: agrupa, compara contra el ciclo anterior y decide arrastres.\n */\nfunction consolidar(lista, historial, config = {}) {\n  const ciclo = config.ciclo_activo;\n  const maxArrastres = Number(config.max_arrastres || 3);\n  const prev = cicloAnterior(ciclo);\n\n  const delCiclo = (lista || []).filter(r => r && r.ciclo === ciclo && r.estado === 'pendiente');\n  const anterior = (historial || []).filter(r => r && r.ciclo === prev);\n\n  const compradosAntes = new Set(anterior.filter(r => r.estado === 'comprado').map(r => clave(r.item)));\n  const pendientesAntes = new Set(anterior.filter(r => r.estado !== 'comprado').map(r => clave(r.item)));\n\n  const vivos = delCiclo.filter(r => Number(r.veces_arrastrado || 0) < maxArrastres);\n  const descartados = delCiclo.filter(r => Number(r.veces_arrastrado || 0) >= maxArrastres);\n\n  const repetidos = vivos.filter(r => compradosAntes.has(clave(r.item)));\n  const arrastrados = vivos.filter(r => pendientesAntes.has(clave(r.item)));\n  const nuevos = vivos.filter(r => !compradosAntes.has(clave(r.item)) && !pendientesAntes.has(clave(r.item)));\n\n  const porCategoria = ORDEN_CATEGORIAS\n    .map(cat => ({\n      categoria: cat,\n      emoji: EMOJI_CATEGORIA[cat],\n      filas: vivos.filter(r => r.categoria === cat)\n                  .sort((a, b) => String(a.item).localeCompare(String(b.item), 'es')),\n    }))\n    .filter(g => g.filas.length);\n\n  return {\n    ciclo, ciclo_anterior: prev, ciclo_nuevo: cicloSiguiente(ciclo),\n    mes: nombreMes(ciclo),\n    total: vivos.length,\n    porCategoria, vivos, descartados, repetidos, arrastrados, nuevos,\n  };\n}\n\n// ------------------------------------------------------------------- render\n\n/** Telegram rechaza el mensaje entero si un & o un < rompen el HTML. */\nfunction esc(s) {\n  return String(s == null ? '' : s)\n    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n}\n\nfunction lineaItem(r, opts = {}) {\n  const c = Number(r.cantidad) || 1;\n  const un = r.unidad && r.unidad !== 'u' ? r.unidad : '';\n  const cant = c > 1 || un ? ` x${c}${un}` : '';\n  const nota = r.nota && opts.conNota !== false ? `  (${esc(r.nota)})` : '';\n  return `• ${esc(r.item)}${cant}${nota}`;\n}\n\nfunction renderLista(lista, config = {}) {\n  const pendientes = (lista || []).filter(r => r && r.estado === 'pendiente');\n  if (!pendientes.length) {\n    return 'La lista está vacía 🤷\\nEscribime lo que falte y lo anoto.';\n  }\n  let txt = `🛒 <b>Lista actual</b> — ${pendientes.length} ítems\\n`;\n  for (const cat of ORDEN_CATEGORIAS) {\n    const filas = pendientes.filter(r => r.categoria === cat)\n                            .sort((a, b) => String(a.item).localeCompare(String(b.item), 'es'));\n    if (!filas.length) continue;\n    txt += `\\n${EMOJI_CATEGORIA[cat]} <b>${cat.toUpperCase()}</b>\\n${filas.map(r => lineaItem(r)).join('\\n')}\\n`;\n  }\n  const mes = config.ciclo_activo ? nombreMes(config.ciclo_activo) : null;\n  txt += mes ? `\\nSe manda sola el 1 de ${mes}.` : '';\n  return txt.trim();\n}\n\nfunction renderMensual(c) {\n  if (!c.total) {\n    return `🛒 <b>Compra de ${c.mes}</b>\\n\\nNo hay nada anotado este mes 🤷\\n` +\n           `Escribime los ítems y te armo la lista.`;\n  }\n  let txt = `🛒 <b>Compra de ${c.mes}</b>\\n${c.total} ítems\\n`;\n  for (const g of c.porCategoria) {\n    txt += `\\n${g.emoji} <b>${g.categoria.toUpperCase()}</b>\\n${g.filas.map(r => lineaItem(r)).join('\\n')}\\n`;\n  }\n  const nombres = rs => [...new Set(rs.map(r => esc(r.item)))].join(' · ');\n  txt += `\\n────────────────\\n`;\n  if (c.repetidos.length)\n    txt += `\\n🔁 <b>Se repite del mes pasado</b> (${c.repetidos.length})\\n${nombres(c.repetidos)}\\n`;\n  if (c.arrastrados.length)\n    txt += `\\n⏳ <b>Quedó pendiente el mes pasado</b> (${c.arrastrados.length})\\n${nombres(c.arrastrados)}\\n`;\n  if (c.nuevos.length)\n    txt += `\\n🆕 <b>Nuevo este mes</b> (${c.nuevos.length})\\n${nombres(c.nuevos)}\\n`;\n  if (c.descartados.length)\n    txt += `\\n🗑️ <b>Saqué por 3 meses sin comprar</b> (${c.descartados.length})\\n${nombres(c.descartados)}\\n— avisame si los siguen necesitando\\n`;\n  return txt.trim();\n}\n\nfunction renderConfirmacion(appends, updates) {\n  const partes = [];\n  if (appends.length) {\n    partes.push('✅ Anoté:\\n' + appends.map(r => lineaItem(r)).join('\\n'));\n  }\n  if (updates.length) {\n    partes.push('🔁 Ya estaban, sumé:\\n' + updates\n      .map(u => `• ${esc(u.item)} → ahora ${u.cantidad}`).join('\\n'));\n  }\n  return partes.join('\\n\\n');\n}\n\nconst TEXTO_AYUDA = [\n  '🤖 <b>Cómo usarme</b>',\n  '',\n  'Escribime lo que falta, como te salga:',\n  '• \"leche\"',\n  '• \"se terminó el café\"',\n  '• \"papel higiénico x2\"',\n  '• \"detergente y esponjas\"',\n  '',\n  '<b>Comandos</b>',\n  '• <b>lista</b> — ver lo que hay anotado',\n  '• <b>borrar &lt;ítem&gt;</b> — sacar algo',\n  '• <b>ya compré</b> — cerrar la compra del mes',\n  '• <b>ya compré leche, café</b> — marcar solo esos',\n  '• <b>deshacer</b> — revertir mi último cambio',\n  '• <b>reset</b> — vaciar la lista (pide confirmación)',\n  '',\n  'El 1 de cada mes a las 9 mando la lista completa acá.',\n  'También entiendo audios 🎤',\n].join('\\n');\n\n/** Telegram corta en 4096; partimos por bloques para no cortar al medio. */\nfunction partirMensaje(txt, max = 3900) {\n  if (txt.length <= max) return [txt];\n  const partes = [];\n  let buf = '';\n  for (const bloque of txt.split('\\n\\n')) {\n    if ((buf + '\\n\\n' + bloque).length > max) { if (buf) partes.push(buf); buf = bloque; }\n    else buf = buf ? buf + '\\n\\n' + bloque : bloque;\n  }\n  if (buf) partes.push(buf);\n  return partes;\n}\n\n/** Teclado inline: un ✅ por item (max 90 botones) + acciones al final. */\nfunction tecladoLista(filas, opts = {}) {\n  const botones = filas.slice(0, 90).map(r => ([{\n    text: `✅ ${String(r.item).slice(0, 25)}`,\n    callback_data: `ok:${r.id}`,\n  }]));\n  if (opts.conCerrar !== false) {\n    botones.push([{ text: '🛒 Ya compré todo', callback_data: 'comprado:all' }]);\n  }\n  return { inline_keyboard: botones };\n}\n\n// ------------------------------------------------------------------ prompt\n\n/**\n * Solo ve los fragmentos que el diccionario no supo resolver, asi que es\n * corto y barato. Los placeholders los reemplaza el Code node \"Preparar\".\n */\nconst PROMPT_IA = [\n  'Sos el normalizador de una lista de compras compartida de una casa en Argentina.',\n  'Convertis el mensaje en items de compra. Respondes SOLO un objeto JSON valido,',\n  'sin texto alrededor y sin ```.',\n  '',\n  'Categorias permitidas (exactamente estos strings): ' + CATEGORIAS.join(', ') + '.',\n  'Unidades permitidas: ' + UNIDADES.join(', ') + '.',\n  '',\n  'ITEMS YA CARGADOS (si el producto ya esta, devolve su id en id_existente y en',\n  'cantidad SOLO lo que hay que sumar):',\n  '__LISTA__',\n  '',\n  'ITEMS CONOCIDOS DE LA CASA (reusa el nombre canonico si aplica):',\n  '__CATALOGO__',\n  '',\n  'Reglas:',\n  '1. Un mensaje puede tener varios items: \"detergente y esponjas\" son DOS.',\n  '2. Ignora el verbo: \"se termino el cafe\" / \"falta cafe\" -> item \"Cafe\".',\n  '3. Nombre canonico en singular y con mayuscula inicial, salvo productos que',\n  '   solo existen en plural (Fideos, Galletitas, Huevos).',\n  '4. NO inventes items que no esten en el mensaje.',\n  '5. Cantidad por defecto 1, maximo 99. \"x2\", \"dos\", \"media docena\"=6,',\n  '   \"docena\"=12, \"medio kilo\"=0.5 kg.',\n  '6. Variantes del MISMO producto (descremada, marca, tamano) no crean item',\n  '   nuevo: van en \"nota\".',\n  '7. Productos distintos aunque compartan palabra SI son items nuevos:',\n  '   \"leche\" vs \"leche de almendras\", \"papel higienico\" vs \"papel de cocina\",',\n  '   \"jabon en polvo\" vs \"jabon de tocador\".',\n  '8. Saludos, chistes, emojis y preguntas no son items: devolve items vacio.',\n  '9. confianza entre 0 y 1. Usa menos de 0.5 si dudas de que sea un producto.',\n  '10. Ante la duda, NO anotes: ensuciar la lista molesta mas que no anotar.',\n  '',\n  'Formato exacto de salida:',\n  '{\"items\":[{\"item\":\"Papel higienico\",\"cantidad\":2,\"unidad\":\"u\",',\n  '\"categoria\":\"higiene\",\"id_existente\":null,\"nota\":null,',\n  '\"texto_original\":\"papel higienico x2\",\"confianza\":0.97}]}',\n  '',\n  'MENSAJE:',\n  '__MENSAJE__',\n].join('\\n');\n\n\n// ===== fin de la libreria =====\n\nfunction filasAObjetos(valueRange) {\n  const v = (valueRange && valueRange.values) || [];\n  if (!v.length) return [];\n  const head = v[0].map(h => String(h).trim());\n  return v.slice(1).map((fila, i) => {\n    const o = { _fila: i + 2 };                 // numero de fila real en la hoja\n    head.forEach((h, j) => { o[h] = fila[j] != null ? fila[j] : ''; });\n    return o;\n  });\n}\nfunction leerHojas(json) {\n  const r = json.valueRanges || [];\n  const lista = filasAObjetos(r[0]);\n  const catalogo = filasAObjetos(r[1]);\n  const cfgFilas = filasAObjetos(r[2]);\n  const config = {};\n  for (const f of cfgFilas) config[f.clave] = f.valor;\n  return { lista, catalogo, config };\n}\nconst COL = { id:'A', ciclo:'B', item:'C', variantes:'D', cantidad:'E', unidad:'F',\n              categoria:'G', pedido_por:'H', nota:'I', fecha_alta:'J', estado:'K',\n              fecha_compra:'L', veces_arrastrado:'M', origen:'N', msg_origen:'O' };\nconst ORDEN_COLS = ['id','ciclo','item','variantes','cantidad','unidad','categoria',\n                    'pedido_por','nota','fecha_alta','estado','fecha_compra',\n                    'veces_arrastrado','origen','msg_origen'];\nfunction filaDesdeObjeto(o) { return ORDEN_COLS.map(k => o[k] != null ? o[k] : ''); }\nfunction tg(config, metodo) {\n  return 'https://api.telegram.org/bot' + String(config.telegram_bot_token || '').trim() + '/' + metodo;\n}\n\nconst { lista, catalogo, config } = leerHojas($('Leer hojas').first().json);\nconst upd = $('Telegram Trigger').first().json;\n\n// --- normalizar el update de Telegram (mensaje o botón) -------------------\nconst cb  = upd.callback_query || null;\nconst msg = cb ? cb.message : (upd.message || upd.edited_message);\nif (!msg) return [];\n\nconst from    = cb ? cb.from : msg.from;\nconst chatId  = String(msg.chat.id);\nconst userId  = String(from.id);\nconst nombre  = from.first_name || from.username || userId;\nconst texto   = cb ? '' : (msg.text || msg.caption || '');\nconst voiceId = (msg.voice && msg.voice.file_id) || (msg.audio && msg.audio.file_id) || null;\n\n// --- autorización ---------------------------------------------------------\nconst permitidos = [config.persona_1_user_id, config.persona_2_user_id]\n  .map(x => String(x || '').trim()).filter(x => x && x !== '<PEGAR>');\nif (permitidos.length && !permitidos.includes(userId)) return [];   // silencio\n\nconst base = {\n  chat_id: chatId, user_id: userId, nombre, update_id: upd.update_id,\n  callback_id: cb ? cb.id : null,\n  url_responder: tg(config, 'sendMessage'),\n  url_append: 'https://sheets.googleapis.com/v4/spreadsheets/1Boax5fBBasvYdIy2AEmVhaNonSUGq1jB0IvMbxdEDfA/values/Lista!A:O:append',\n  url_batch: 'https://sheets.googleapis.com/v4/spreadsheets/1Boax5fBBasvYdIy2AEmVhaNonSUGq1jB0IvMbxdEDfA/values:batchUpdate',\n  ciclo: config.ciclo_activo || '',\n  appends: [], updates: [], necesita_ia: false, prompt_ia: '',\n};\nconst responder = (t, extra = {}) => [{ json: { ...base, respuesta: t, ...extra } }];\n\n// --- botón \"✅ item\" o \"🛒 ya compré todo\" ---------------------------------\nif (cb) {\n  const dato = String(cb.data || '');\n  const ahora = new Date().toISOString();\n  if (dato === 'comprado:all') {\n    const pend = lista.filter(r => r.estado === 'pendiente');\n    return responder(`🛒 ${esc(nombre)} cerró la compra: ${pend.length} ítems marcados.`, {\n      updates: pend.flatMap(r => [\n        { range: 'Lista!K' + r._fila, values: [['comprado']] },\n        { range: 'Lista!L' + r._fila, values: [[ahora]] },\n      ]),\n    });\n  }\n  const id = dato.replace(/^ok:/, '');\n  const fila = lista.find(r => String(r.id) === id && r.estado === 'pendiente');\n  if (!fila) return responder('Ese ítem ya estaba marcado 👍');\n  return responder(`✅ ${esc(fila.item)} — marcado por ${esc(nombre)}`, {\n    updates: [\n      { range: 'Lista!K' + fila._fila, values: [['comprado']] },\n      { range: 'Lista!L' + fila._fila, values: [[ahora]] },\n    ],\n  });\n}\n\n// --- audio: se resuelve en la rama de transcripción ------------------------\nif (!texto && voiceId) {\n  return [{ json: { ...base, respuesta: '', es_audio: true, file_id: voiceId,\n                    url_getfile: tg(config, 'getFile'),\n                    token: String(config.telegram_bot_token || '').trim() } }];\n}\nif (!texto) return responder('Por ahora solo entiendo texto y audios 🙂');\n\n// --- comandos -------------------------------------------------------------\nconst { comando, argumento } = routerComandos(texto);\nconst ahora = new Date().toISOString();\n\nif (comando === 'ayuda') return responder(TEXTO_AYUDA);\nif (comando === 'lista') {\n  const pend = lista.filter(r => r.estado === 'pendiente');\n  return responder(renderLista(lista, config), { teclado: tecladoLista(pend) });\n}\nif (comando === 'reset') {\n  const n = lista.filter(r => r.estado === 'pendiente').length;\n  return responder(`⚠️ Esto saca los ${n} ítems de la lista sin marcarlos como comprados.\\nSi estás seguro, escribí <b>confirmar reset</b>`);\n}\nif (comando === 'reset_confirmado') {\n  const pend = lista.filter(r => r.estado === 'pendiente');\n  return responder('🧹 Lista vacía. Empezamos de cero.', {\n    updates: pend.map(r => ({ range: 'Lista!K' + r._fila, values: [['descartado']] })),\n  });\n}\nif (comando === 'borrar') {\n  const m = matchParaBorrar(argumento, lista);\n  if (m.estado === 'no_encontrado')\n    return responder(`No encontré \"${esc(argumento)}\" en la lista. Escribí <b>lista</b> para ver qué hay.`);\n  if (m.estado === 'ambiguo')\n    return responder('¿Cuál? ' + m.filas.map(f => '<b>' + esc(f.item) + '</b>').join(' o ') +\n                     '\\nEscribí <b>borrar &lt;nombre completo&gt;</b>.');\n  return responder(`🗑️ Saqué <b>${esc(m.filas[0].item)}</b> de la lista.`, {\n    updates: [{ range: 'Lista!K' + m.filas[0]._fila, values: [['descartado']] }],\n  });\n}\nif (comando === 'comprado') {\n  let objetivo;\n  if (argumento) {\n    objetivo = [];\n    for (const parte of argumento.split(',').map(s => s.trim()).filter(Boolean)) {\n      const m = matchParaBorrar(parte, lista);\n      if (m.estado === 'ok') objetivo.push(m.filas[0]);\n    }\n    if (!objetivo.length) return responder(`No encontré nada de \"${esc(argumento)}\" en la lista.`);\n  } else {\n    objetivo = lista.filter(r => r.estado === 'pendiente');\n    if (!objetivo.length) return responder('No hay nada pendiente para marcar 🤷');\n  }\n  const quedan = lista.filter(r => r.estado === 'pendiente' && !objetivo.includes(r)).length;\n  const txt = argumento\n    ? `✅ Marqué: ${objetivo.map(r => esc(r.item)).join(', ')}. Quedan ${quedan}.`\n    : `✅ ${esc(nombre)} cerró la compra: ${objetivo.length} ítems. Lo que anoten desde ahora va al mes que viene.`;\n  return responder(txt, {\n    updates: objetivo.flatMap(r => [\n      { range: 'Lista!K' + r._fila, values: [['comprado']] },\n      { range: 'Lista!L' + r._fila, values: [[ahora]] },\n    ]),\n  });\n}\n\n// --- texto libre: primero el diccionario, gratis --------------------------\nconst local = normalizarLocal(texto, catalogo);\nconst usarIA = String(config.usar_ia || 'true') !== 'false';\n\nif (local.resueltoTodo && local.items.length) {\n  const plan = planificarEscrituras(validarItems(local.items), lista,\n    { ciclo: config.ciclo_activo, nombre, ahora, msgId: String(upd.update_id) });\n  return [{ json: { ...base,\n    respuesta: renderConfirmacion(plan.appends, plan.updates),\n    appends: plan.appends.map(filaDesdeObjeto),\n    updates: plan.updates.flatMap(u => {\n      const f = lista.find(r => String(r.id) === String(u.id));\n      return f ? [\n        { range: 'Lista!E' + f._fila, values: [[u.cantidad]] },\n        { range: 'Lista!D' + f._fila, values: [[u.variantes]] },\n        { range: 'Lista!H' + f._fila, values: [[u.pedido_por]] },\n      ] : [];\n    }),\n  } }];\n}\n\nif (!usarIA) {\n  if (local.items.length) {\n    const plan = planificarEscrituras(validarItems(local.items), lista,\n      { ciclo: config.ciclo_activo, nombre, ahora, msgId: String(upd.update_id) });\n    return [{ json: { ...base,\n      respuesta: renderConfirmacion(plan.appends, plan.updates) +\n        `\\n\\n🤔 No entendí: ${esc(local.sinResolver.join(', '))}`,\n      appends: plan.appends.map(filaDesdeObjeto), updates: [] } }];\n  }\n  return responder('No pude sacar ítems de eso 🤔 Escribí <b>ayuda</b> para ver qué entiendo.');\n}\n\n// --- cae al LLM solo lo que el diccionario no supo ------------------------\nconst contexto = {\n  lista: lista.filter(r => r.estado === 'pendiente')\n              .map(r => ({ id: r.id, item: r.item, cant: r.cantidad, cat: r.categoria })),\n  catalogo: catalogo.slice(0, 120)\n              .map(c => ({ item: c.item_canonico, cat: c.categoria })),\n};\nreturn [{ json: { ...base, necesita_ia: true,\n  respuesta: '',\n  pendientes_ia: local.sinResolver,\n  items_locales: validarItems(local.items),\n  prompt_ia: PROMPT_IA\n    .replace('__LISTA__', JSON.stringify(contexto.lista))\n    .replace('__CATALOGO__', JSON.stringify(contexto.catalogo))\n    .replace('__MENSAJE__', local.sinResolver.join(' ; ')),\n} }];\n"
+      },
+      "id": "n003",
+      "name": "Preparar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().filter(i => i.json.es_audio);"
+      },
+      "id": "n004",
+      "name": "Gate: audio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "method": "GET",
+        "url": "={{ $json.url_getfile }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "file_id",
+              "value": "={{ $json.file_id }}"
+            }
+          ]
+        }
+      },
+      "id": "n005",
+      "name": "Telegram getFile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        },
+        "method": "GET",
+        "url": "={{ \"https://api.telegram.org/file/bot\" + $('Gate: audio').first().json.token + \"/\" + $json.result.file_path }}"
+      },
+      "id": "n006",
+      "name": "Bajar audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "contentType": "multipart-form-data",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model",
+              "value": "whisper-large-v3-turbo"
+            },
+            {
+              "name": "language",
+              "value": "es"
+            },
+            {
+              "name": "prompt",
+              "value": "Lista de compras de supermercado en Argentina: leche, yerba, fideos, lavandina, papel higiénico, fernet."
+            }
+          ]
+        }
+      },
+      "id": "n007",
+      "name": "Transcribir (Groq Whisper)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        560
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst t = ($json.text || '').trim();\nconst ctx = $('Gate: audio').first().json;\nif (t.length < 3) {\n  return [{ json: { ...ctx, respuesta: 'No pude escuchar bien el audio, ¿me lo escribís? 🎤' } }];\n}\n// Se reinyecta como si hubiera sido texto: el usuario ve qué se entendió.\nreturn [{ json: { ...ctx, texto_transcripto: t, respuesta: '🎤 Entendí: \"' + t + '\"\\n\\nMandámelo por texto si me equivoqué.' } }];\n"
+      },
+      "id": "n008",
+      "name": "Audio → texto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().filter(i => i.json.respuesta);"
+      },
+      "id": "n009",
+      "name": "Gate: responder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "method": "POST",
+        "url": "={{ $json.url_responder }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.chat_id, text: $json.respuesta, parse_mode: \"HTML\", reply_markup: $json.teclado || undefined }) }}"
+      },
+      "id": "n010",
+      "name": "Responder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().filter(i => (i.json.appends || []).length);"
+      },
+      "id": "n011",
+      "name": "Gate: hay filas nuevas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "method": "POST",
+        "url": "={{ $json.url_append }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "valueInputOption",
+              "value": "RAW"
+            },
+            {
+              "name": "insertDataOption",
+              "value": "INSERT_ROWS"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ values: $json.appends }) }}"
+      },
+      "id": "n012",
+      "name": "Agregar filas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().filter(i => (i.json.updates || []).length);"
+      },
+      "id": "n013",
+      "name": "Gate: hay celdas a actualizar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "method": "POST",
+        "url": "={{ $json.url_batch }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ valueInputOption: \"RAW\", data: $json.updates }) }}"
+      },
+      "id": "n014",
+      "name": "Actualizar celdas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().filter(i => i.json.necesita_ia);"
+      },
+      "id": "n015",
+      "name": "Gate: necesita IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: $json.prompt_ia }] }], generationConfig: { temperature: 0, responseMimeType: \"application/json\", maxOutputTokens: 800 } }) }}"
+      },
+      "id": "n016",
+      "name": "Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        40
+      ],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== lib/compras.js (generado por tools/build_workflows.js - no editar aca) =====\n/**\n * Logica pura del bot de lista de compras.\n *\n * Sin dependencias y sin I/O a proposito: todo lo que hay aca se testea en\n * bot-compras/test/ y despues se inyecta tal cual dentro de los Code nodes de\n * n8n (ver tools/build_workflows.js). Fuente unica de verdad.\n */\n\n// ---------------------------------------------------------------- constantes\n\nconst CATEGORIAS = ['almacén', 'lácteos', 'limpieza', 'higiene', 'bebidas', 'frescos', 'otros'];\nconst UNIDADES = ['u', 'kg', 'g', 'l', 'ml', 'paq', 'docena'];\n\n// Orden de recorrido del super, no alfabetico.\nconst ORDEN_CATEGORIAS = ['almacén', 'lácteos', 'frescos', 'limpieza', 'higiene', 'bebidas', 'otros'];\n\nconst EMOJI_CATEGORIA = {\n  'almacén': '🥫', 'lácteos': '🥛', 'frescos': '🥬',\n  'limpieza': '🧼', 'higiene': '🧴', 'bebidas': '🍷', 'otros': '📦',\n};\n\nconst MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',\n               'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];\n\n// Se sacan del principio del segmento antes de buscar el producto.\nconst PREFIJOS_RUIDO = [\n  'se nos termino', 'se nos acabo', 'se termino', 'se acabo', 'se acaba',\n  'hay que comprar', 'hay que traer', 'tenemos que comprar', 'acordate de',\n  'no hay mas', 'no queda mas', 'no hay', 'no queda', 'nos falta', 'me falta',\n  'falta', 'faltan', 'comprar', 'compra', 'traer', 'trae', 'necesito',\n  'necesitamos', 'anota', 'anotar', 'agrega', 'agregar', 'sumar', 'poner',\n  'pone', 'agregame', 'anotame',\n];\n\nconst PALABRAS_RUIDO = ['de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'unos',\n                        'unas', 'mas', 'por', 'para', 'porfa', 'porfavor', 'favor', 'please'];\n\nconst NEGACIONES = [\n  /^no\\s+(compres|compremos|comprar)\\s+(mas\\s+)?(.+)$/,\n  /^(saca|sacar|saca(?:le)?)\\s+(.+)$/,\n  /^ya\\s+no\\s+(hace\\s+falta|necesitamos|necesito)\\s+(?:el\\s+|la\\s+|los\\s+|las\\s+)?(.+)$/,\n];\n\n// ------------------------------------------------------------ normalizacion\n\n/** minusculas, sin tildes, sin repeticiones de letras, espacios colapsados. */\nfunction norm(s) {\n  return String(s == null ? '' : s)\n    .toLowerCase()\n    .normalize('NFD').replace(/[̀-ͯ]/g, '')\n    .replace(/([^\\W\\d_])\\1{2,}/g, '$1')  // \"yerbaaa\" -> \"yerba\" (digitos NO)\n    .replace(/[^\\wáéíóúñ\\s,./-]/gi, ' ') // saca emojis; la coma se conserva\n                                          // porque separa items y argumentos\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\n/** Stem pobre pero suficiente para es-AR: solo para comparar, no para mostrar. */\nfunction stem(w) {\n  if (w.length > 4 && w.endsWith('es')) return w.slice(0, -2);\n  if (w.length > 3 && w.endsWith('s')) return w.slice(0, -1);\n  return w;\n}\n\nfunction tokens(s) {\n  return norm(s).split(' ')\n    .map(t => t.replace(/^[,.]+|[,.]+$/g, ''))\n    .filter(t => t && !PALABRAS_RUIDO.includes(t));\n}\n\nfunction clave(s) {\n  return tokens(s).map(stem).sort().join(' ');\n}\n\nfunction levenshtein(a, b) {\n  if (a === b) return 0;\n  if (!a.length) return b.length;\n  if (!b.length) return a.length;\n  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);\n  for (let i = 1; i <= a.length; i++) {\n    const cur = [i];\n    for (let j = 1; j <= b.length; j++) {\n      cur[j] = Math.min(\n        prev[j] + 1,\n        cur[j - 1] + 1,\n        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),\n      );\n    }\n    prev = cur;\n  }\n  return prev[b.length];\n}\n\nfunction similitud(a, b) {\n  const max = Math.max(a.length, b.length);\n  return max === 0 ? 1 : 1 - levenshtein(a, b) / max;\n}\n\n// ---------------------------------------------------------------- cantidades\n\nconst NUMEROS_PALABRA = {\n  un: 1, uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6,\n  siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12,\n};\n\nconst UNIDAD_PALABRA = {\n  kilo: 'kg', kilos: 'kg', kg: 'kg', k: 'kg',\n  gramo: 'g', gramos: 'g', g: 'g', gr: 'g',\n  litro: 'l', litros: 'l', l: 'l', lt: 'l', lts: 'l',\n  ml: 'ml', cc: 'ml',\n  paquete: 'paq', paquetes: 'paq', paq: 'paq', pack: 'paq', caja: 'paq', cajas: 'paq',\n  docena: 'docena', docenas: 'docena',\n};\n\n/**\n * Saca la cantidad del texto y devuelve el resto limpio.\n * @returns {{cantidad:number, unidad:string, resto:string}}\n */\nfunction parseCantidad(texto) {\n  let t = norm(texto);\n  let cantidad = null;\n  let unidad = 'u';\n\n  const quitar = (re, fn) => {\n    const m = t.match(re);\n    if (!m) return false;\n    fn(m);\n    t = (t.slice(0, m.index) + ' ' + t.slice(m.index + m[0].length)).replace(/\\s+/g, ' ').trim();\n    return true;\n  };\n\n  // \"media docena\" / \"docena\" -> 6 / 12\n  quitar(/\\b(media|medias)\\s+docenas?\\b/, () => { cantidad = 6; })\n    || quitar(/\\b(una\\s+)?docenas?\\b/, () => { cantidad = 12; })\n    // \"medio kilo\" / \"media caja\"\n    || quitar(/\\b(medio|media)\\s+(kilos?|litros?|paquetes?|cajas?)\\b/, (m) => {\n         cantidad = 0.5; unidad = UNIDAD_PALABRA[m[2]] || 'u';\n       })\n    // \"un par de\" (el \"un\" puede venir ya comido por limpiarPrefijos)\n    || quitar(/\\b(?:un\\s+)?par\\b/, () => { cantidad = 2; })\n    // \"2 kg\" / \"3 litros\" / \"2 paquetes\"\n    || quitar(/\\b(\\d+(?:[.,]\\d+)?)\\s*(kilos?|kg|k|gramos?|gr?|litros?|lts?|l|ml|cc|paquetes?|paq|pack|cajas?|docenas?)\\b/,\n         (m) => { cantidad = parseFloat(m[1].replace(',', '.')); unidad = UNIDAD_PALABRA[m[2]] || 'u'; })\n    // \"dos litros\"\n    || quitar(new RegExp(`\\\\b(${Object.keys(NUMEROS_PALABRA).join('|')})\\\\s+(kilos?|litros?|paquetes?|cajas?)\\\\b`),\n         (m) => { cantidad = NUMEROS_PALABRA[m[1]]; unidad = UNIDAD_PALABRA[m[2]] || 'u'; })\n    // \"x2\" / \"X 2\" / \"*2\"\n    || quitar(/\\b[x*]\\s*(\\d+)\\b/, (m) => { cantidad = parseInt(m[1], 10); })\n    || quitar(/\\((\\d+)\\)/, (m) => { cantidad = parseInt(m[1], 10); })\n    // \"2 leches\" (numero suelto al principio)\n    || quitar(/^(\\d+)\\s+/, (m) => { cantidad = parseInt(m[1], 10); })\n    // \"dos leches\"\n    || quitar(new RegExp(`^(${Object.keys(NUMEROS_PALABRA).join('|')})\\\\s+`),\n         (m) => { cantidad = NUMEROS_PALABRA[m[1]]; });\n\n  if (cantidad == null) cantidad = 1;\n  if (!(cantidad > 0)) cantidad = 1;\n  cantidad = Math.min(cantidad, 99);\n\n  return { cantidad, unidad, resto: t };\n}\n\n// ------------------------------------------------------------------ catalogo\n\n/**\n * @param {string} texto\n * @param {Array<{item_canonico:string, categoria:string, alias:string}>} catalogo\n * @returns {{item:string, categoria:string, score:number, sobrante:string}|null}\n */\nfunction buscarEnCatalogo(texto, catalogo) {\n  const t = norm(texto);\n  if (!t) return null;\n  const tk = tokens(t);\n  const k = clave(t);\n  if (!tk.length) return null;\n\n  let mejor = null;\n  const considerar = (cand, score, usados) => {\n    if (score <= 0) return;\n    if (!mejor || score > mejor.score) {\n      const sobrante = tk.filter(x => !usados.has(stem(x))).join(' ');\n      mejor = { item: cand.item_canonico, categoria: cand.categoria, score, sobrante };\n    }\n  };\n\n  for (const c of catalogo) {\n    if (!c || !c.item_canonico) continue;\n    const variantes = [c.item_canonico, ...String(c.alias || '').split(',')]\n      .map(v => norm(v)).filter(Boolean);\n    // Todo lo que esta entrada sabe llamarse, para juzgar el sobrante.\n    const propios = new Set(variantes.flatMap(v => tokens(v)).map(stem));\n\n    for (const v of variantes) {\n      const vk = clave(v);\n      const vtk = tokens(v);\n      if (!vtk.length) continue;\n      const usados = new Set(vtk.map(stem));\n\n      if (vk === k) { considerar(c, 1.0, usados); continue; }        // igual\n\n      // Un alias corto (\"te\", \"ala\", \"deo\") solo vale si es el mensaje entero:\n      // si no, \"te amo\" se convierte en un pedido de te.\n      if (vtk.length === 1 && vtk[0].length <= 3) continue;\n\n      // el alias esta contenido entero en el mensaje (\"fideos x3 tirabuzon\")\n      const contenido = vtk.every(w => tk.some(x => stem(x) === stem(w)));\n      if (contenido) {\n        const sobra = tk.filter(x => !usados.has(stem(x)));\n\n        // Un alias generico de UNA palabra (\"papel\", \"leche\", \"queso\") con algo\n        // colgando es ambiguo: \"papel de aluminio\" no es papel higienico y\n        // \"leche de almendras\" no es leche. Solo se acepta si lo que sobra\n        // tambien es una forma de nombrar a este mismo item (\"fideos tirabuzon\").\n        if (vtk.length === 1 && sobra.length &&\n            !sobra.every(x => propios.has(stem(x)))) continue;\n\n        // cuanto mas sobra, menos confiable: una frase larga con una palabra\n        // suelta de producto es mejor que la lea el LLM.\n        considerar(c, 0.95 - 0.06 * sobra.length, usados);\n        continue;\n      }\n      // typo en un alias de una sola palabra\n      if (vtk.length === 1 && tk.length === 1) {\n        const s = similitud(stem(tk[0]), stem(vtk[0]));\n        if (s >= 0.8) considerar(c, 0.6 + (s - 0.8) * 1.5, usados);\n      }\n    }\n  }\n  return mejor;\n}\n\n// -------------------------------------------------------------- segmentacion\n\nfunction segmentar(texto) {\n  return norm(texto)\n    .split(/\\s*(?:,|;|\\/|\\+|\\n|\\by\\b|\\be\\b|\\btambien\\b)\\s*/)\n    .map(s => s.trim())\n    .filter(Boolean);\n}\n\nfunction limpiarPrefijos(seg) {\n  let s = norm(seg);\n  let cambio = true;\n  while (cambio) {\n    cambio = false;\n    for (const p of PREFIJOS_RUIDO) {\n      if (s === p) return '';\n      if (s.startsWith(p + ' ')) { s = s.slice(p.length + 1).trim(); cambio = true; break; }\n    }\n    const m = s.match(/^(el|la|los|las|un|una|unos|unas|de|del)\\s+(.+)$/);\n    if (m) { s = m[2]; cambio = true; }\n  }\n  return s;\n}\n\n// ------------------------------------------------------------------ comandos\n\nconst REGLAS_COMANDO = [\n  [/^(lista|ver lista|la lista|que hay|que tenemos|mostrar|mostrame la lista|pasame la lista)$/, 'lista'],\n  [/^(ayuda|help|comandos|start|\\?)$/, 'ayuda'],\n  [/^(deshacer|undo)$/, 'deshacer'],\n  [/^confirmar reset$/, 'reset_confirmado'],\n  [/^reset$/, 'reset'],\n  [/^(borrar|sacar|quitar|eliminar|cancelar)\\s+(.+)$/, 'borrar'],\n  [/^(ya compre|ya compramos|compre|compramos|ya esta|listo|ya fuimos)(?:\\s+(.+))?$/, 'comprado'],\n];\n\n/** @returns {{comando:string|null, argumento:string}} */\nfunction routerComandos(texto) {\n  const t = norm(texto).replace(/^\\//, '');   // /lista -> lista\n  for (const [re, nombre] of REGLAS_COMANDO) {\n    const m = t.match(re);\n    if (m) return { comando: nombre, argumento: (m[2] || '').trim() };\n  }\n  for (const re of NEGACIONES) {\n    const m = t.match(re);\n    if (m) return { comando: 'borrar', argumento: (m[m.length - 1] || '').trim() };\n  }\n  return { comando: null, argumento: '' };\n}\n\n// -------------------------------------------------------- normalizador local\n\n/**\n * Intenta resolver el mensaje con el diccionario, sin IA.\n * @returns {{items:Array, sinResolver:Array<string>, resueltoTodo:boolean}}\n */\nfunction normalizarLocal(texto, catalogo, opts = {}) {\n  const umbral = opts.umbral == null ? 0.75 : opts.umbral;\n  const items = [];\n  const sinResolver = [];\n\n  for (const seg of segmentar(texto)) {\n    const limpio = limpiarPrefijos(seg);\n    if (!limpio) continue;\n\n    const { cantidad, unidad, resto } = parseCantidad(limpio);\n    const base = limpiarPrefijos(resto);\n    if (!base) { sinResolver.push(seg); continue; }\n\n    const hit = buscarEnCatalogo(base, catalogo);\n    if (hit && hit.score >= umbral) {\n      items.push({\n        item: hit.item,\n        cantidad,\n        unidad,\n        categoria: CATEGORIAS.includes(hit.categoria) ? hit.categoria : 'otros',\n        nota: hit.sobrante || null,\n        texto_original: seg,\n        confianza: Math.min(0.99, hit.score),\n        fuente: 'diccionario',\n      });\n    } else {\n      sinResolver.push(seg);\n    }\n  }\n\n  return { items: fusionarDuplicados(items), sinResolver, resueltoTodo: sinResolver.length === 0 };\n}\n\n/** \"cafe y cafe molido\" -> un solo item con la suma. */\nfunction fusionarDuplicados(items) {\n  const out = [];\n  for (const it of items) {\n    const ya = out.find(o => o.item === it.item);\n    if (ya) {\n      ya.cantidad = Math.min(99, ya.cantidad + it.cantidad);\n      if (it.nota && !ya.nota) ya.nota = it.nota;\n      ya.texto_original += ' | ' + it.texto_original;\n    } else {\n      out.push({ ...it });\n    }\n  }\n  return out;\n}\n\n// --------------------------------------------------------------- validacion\n\n/** Blinda cualquier salida (del LLM o del diccionario) antes de tocar el Sheet. */\nfunction validarItems(items, opts = {}) {\n  const umbral = opts.umbralConfianza == null ? 0.4 : opts.umbralConfianza;\n  if (!Array.isArray(items)) return [];\n  return items\n    .filter(i => i && typeof i.item === 'string' && norm(i.item).length >= 2)\n    .filter(i => (i.confianza == null ? 1 : Number(i.confianza)) >= umbral)\n    .slice(0, 15)\n    .map(i => {\n      let cant = Number(i.cantidad);\n      if (!Number.isFinite(cant) || cant <= 0) cant = 1;\n      return {\n        item: String(i.item).trim().slice(0, 60),\n        cantidad: Math.min(cant, 99),\n        unidad: UNIDADES.includes(i.unidad) ? i.unidad : 'u',\n        categoria: CATEGORIAS.includes(i.categoria) ? i.categoria : 'otros',\n        nota: i.nota ? String(i.nota).slice(0, 80) : null,\n        texto_original: String(i.texto_original || '').slice(0, 200),\n        confianza: i.confianza == null ? 1 : Number(i.confianza),\n        fuente: i.fuente || 'ia',\n      };\n    });\n}\n\n// ------------------------------------------------------ dedup contra la hoja\n\n/**\n * Decide, para cada item, si es fila nueva o suma a una existente.\n * @returns {{appends:Array, updates:Array}}\n */\nfunction planificarEscrituras(items, lista, ctx = {}) {\n  const pendientes = (lista || []).filter(r => r && r.estado === 'pendiente');\n  const appends = [];\n  const updates = [];\n\n  for (const it of items) {\n    const existente =\n      pendientes.find(r => norm(r.item) === norm(it.item)) ||\n      pendientes.find(r => clave(r.item) === clave(it.item));\n\n    if (existente) {\n      const ya = updates.find(u => u.id === existente.id);\n      const previa = ya ? ya.cantidad : Number(existente.cantidad) || 0;\n      const nueva = Math.min(99, previa + it.cantidad);\n      const variantes = [existente.variantes, it.texto_original]\n        .filter(Boolean).join(' | ').slice(0, 500);\n      const pedido = unirPersonas(existente.pedido_por, ctx.nombre);\n      if (ya) { ya.cantidad = nueva; ya.variantes = variantes; ya.pedido_por = pedido; }\n      else {\n        updates.push({\n          id: existente.id, item: existente.item, cantidad: nueva,\n          cantidad_previa: Number(existente.cantidad) || 0,\n          variantes, pedido_por: pedido,\n          nota: existente.nota || it.nota || '',\n        });\n      }\n    } else {\n      appends.push({\n        id: nuevoId(ctx.ahora, appends.length),\n        ciclo: ctx.ciclo || '',\n        item: it.item,\n        variantes: it.texto_original,\n        cantidad: it.cantidad,\n        unidad: it.unidad,\n        categoria: it.categoria,\n        pedido_por: ctx.nombre || '',\n        nota: it.nota || '',\n        fecha_alta: ctx.ahora || new Date().toISOString(),\n        estado: 'pendiente',\n        fecha_compra: '',\n        veces_arrastrado: 0,\n        origen: 'mensaje',\n        msg_origen: ctx.msgId || '',\n      });\n    }\n  }\n  return { appends, updates };\n}\n\nfunction unirPersonas(actual, nuevo) {\n  const set = new Set(String(actual || '').split(',').map(s => s.trim()).filter(Boolean));\n  if (nuevo) set.add(String(nuevo).trim());\n  return [...set].join(', ');\n}\n\nfunction nuevoId(ahora, i) {\n  const base = ahora ? Date.parse(ahora) : Date.now();\n  return `${base}-${i}-${Math.random().toString(36).slice(2, 7)}`;\n}\n\n// ------------------------------------------------------------ borrar / match\n\n/**\n * Busca a que fila se refiere \"borrar X\". Nunca adivina si hay empate.\n * @returns {{estado:'ok'|'ambiguo'|'no_encontrado', filas:Array}}\n */\nfunction matchParaBorrar(query, lista) {\n  const pendientes = (lista || []).filter(r => r && r.estado === 'pendiente');\n  const q = norm(query);\n  if (!q) return { estado: 'no_encontrado', filas: [] };\n\n  const exactos = pendientes.filter(r => norm(r.item) === q || clave(r.item) === clave(q));\n  if (exactos.length === 1) return { estado: 'ok', filas: exactos };\n  if (exactos.length > 1) return { estado: 'ambiguo', filas: exactos };\n\n  const parciales = pendientes.filter(r => {\n    const ri = norm(r.item);\n    return ri.includes(q) || q.includes(ri) ||\n           norm(r.variantes || '').includes(q) ||\n           similitud(clave(r.item), clave(q)) >= 0.82;\n  });\n  if (parciales.length === 1) return { estado: 'ok', filas: parciales };\n  if (parciales.length > 1) return { estado: 'ambiguo', filas: parciales };\n  return { estado: 'no_encontrado', filas: [] };\n}\n\n// -------------------------------------------------------------------- ciclos\n\nfunction cicloAnterior(ciclo) {\n  const [y, m] = String(ciclo).split('-').map(Number);\n  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;\n}\n\nfunction cicloSiguiente(ciclo) {\n  const [y, m] = String(ciclo).split('-').map(Number);\n  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;\n}\n\nfunction nombreMes(ciclo) {\n  const m = Number(String(ciclo).split('-')[1]);\n  return MESES[m - 1] || '';\n}\n\n// --------------------------------------------------------------- consolidar\n\n/**\n * Cierre mensual: agrupa, compara contra el ciclo anterior y decide arrastres.\n */\nfunction consolidar(lista, historial, config = {}) {\n  const ciclo = config.ciclo_activo;\n  const maxArrastres = Number(config.max_arrastres || 3);\n  const prev = cicloAnterior(ciclo);\n\n  const delCiclo = (lista || []).filter(r => r && r.ciclo === ciclo && r.estado === 'pendiente');\n  const anterior = (historial || []).filter(r => r && r.ciclo === prev);\n\n  const compradosAntes = new Set(anterior.filter(r => r.estado === 'comprado').map(r => clave(r.item)));\n  const pendientesAntes = new Set(anterior.filter(r => r.estado !== 'comprado').map(r => clave(r.item)));\n\n  const vivos = delCiclo.filter(r => Number(r.veces_arrastrado || 0) < maxArrastres);\n  const descartados = delCiclo.filter(r => Number(r.veces_arrastrado || 0) >= maxArrastres);\n\n  const repetidos = vivos.filter(r => compradosAntes.has(clave(r.item)));\n  const arrastrados = vivos.filter(r => pendientesAntes.has(clave(r.item)));\n  const nuevos = vivos.filter(r => !compradosAntes.has(clave(r.item)) && !pendientesAntes.has(clave(r.item)));\n\n  const porCategoria = ORDEN_CATEGORIAS\n    .map(cat => ({\n      categoria: cat,\n      emoji: EMOJI_CATEGORIA[cat],\n      filas: vivos.filter(r => r.categoria === cat)\n                  .sort((a, b) => String(a.item).localeCompare(String(b.item), 'es')),\n    }))\n    .filter(g => g.filas.length);\n\n  return {\n    ciclo, ciclo_anterior: prev, ciclo_nuevo: cicloSiguiente(ciclo),\n    mes: nombreMes(ciclo),\n    total: vivos.length,\n    porCategoria, vivos, descartados, repetidos, arrastrados, nuevos,\n  };\n}\n\n// ------------------------------------------------------------------- render\n\n/** Telegram rechaza el mensaje entero si un & o un < rompen el HTML. */\nfunction esc(s) {\n  return String(s == null ? '' : s)\n    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n}\n\nfunction lineaItem(r, opts = {}) {\n  const c = Number(r.cantidad) || 1;\n  const un = r.unidad && r.unidad !== 'u' ? r.unidad : '';\n  const cant = c > 1 || un ? ` x${c}${un}` : '';\n  const nota = r.nota && opts.conNota !== false ? `  (${esc(r.nota)})` : '';\n  return `• ${esc(r.item)}${cant}${nota}`;\n}\n\nfunction renderLista(lista, config = {}) {\n  const pendientes = (lista || []).filter(r => r && r.estado === 'pendiente');\n  if (!pendientes.length) {\n    return 'La lista está vacía 🤷\\nEscribime lo que falte y lo anoto.';\n  }\n  let txt = `🛒 <b>Lista actual</b> — ${pendientes.length} ítems\\n`;\n  for (const cat of ORDEN_CATEGORIAS) {\n    const filas = pendientes.filter(r => r.categoria === cat)\n                            .sort((a, b) => String(a.item).localeCompare(String(b.item), 'es'));\n    if (!filas.length) continue;\n    txt += `\\n${EMOJI_CATEGORIA[cat]} <b>${cat.toUpperCase()}</b>\\n${filas.map(r => lineaItem(r)).join('\\n')}\\n`;\n  }\n  const mes = config.ciclo_activo ? nombreMes(config.ciclo_activo) : null;\n  txt += mes ? `\\nSe manda sola el 1 de ${mes}.` : '';\n  return txt.trim();\n}\n\nfunction renderMensual(c) {\n  if (!c.total) {\n    return `🛒 <b>Compra de ${c.mes}</b>\\n\\nNo hay nada anotado este mes 🤷\\n` +\n           `Escribime los ítems y te armo la lista.`;\n  }\n  let txt = `🛒 <b>Compra de ${c.mes}</b>\\n${c.total} ítems\\n`;\n  for (const g of c.porCategoria) {\n    txt += `\\n${g.emoji} <b>${g.categoria.toUpperCase()}</b>\\n${g.filas.map(r => lineaItem(r)).join('\\n')}\\n`;\n  }\n  const nombres = rs => [...new Set(rs.map(r => esc(r.item)))].join(' · ');\n  txt += `\\n────────────────\\n`;\n  if (c.repetidos.length)\n    txt += `\\n🔁 <b>Se repite del mes pasado</b> (${c.repetidos.length})\\n${nombres(c.repetidos)}\\n`;\n  if (c.arrastrados.length)\n    txt += `\\n⏳ <b>Quedó pendiente el mes pasado</b> (${c.arrastrados.length})\\n${nombres(c.arrastrados)}\\n`;\n  if (c.nuevos.length)\n    txt += `\\n🆕 <b>Nuevo este mes</b> (${c.nuevos.length})\\n${nombres(c.nuevos)}\\n`;\n  if (c.descartados.length)\n    txt += `\\n🗑️ <b>Saqué por 3 meses sin comprar</b> (${c.descartados.length})\\n${nombres(c.descartados)}\\n— avisame si los siguen necesitando\\n`;\n  return txt.trim();\n}\n\nfunction renderConfirmacion(appends, updates) {\n  const partes = [];\n  if (appends.length) {\n    partes.push('✅ Anoté:\\n' + appends.map(r => lineaItem(r)).join('\\n'));\n  }\n  if (updates.length) {\n    partes.push('🔁 Ya estaban, sumé:\\n' + updates\n      .map(u => `• ${esc(u.item)} → ahora ${u.cantidad}`).join('\\n'));\n  }\n  return partes.join('\\n\\n');\n}\n\nconst TEXTO_AYUDA = [\n  '🤖 <b>Cómo usarme</b>',\n  '',\n  'Escribime lo que falta, como te salga:',\n  '• \"leche\"',\n  '• \"se terminó el café\"',\n  '• \"papel higiénico x2\"',\n  '• \"detergente y esponjas\"',\n  '',\n  '<b>Comandos</b>',\n  '• <b>lista</b> — ver lo que hay anotado',\n  '• <b>borrar &lt;ítem&gt;</b> — sacar algo',\n  '• <b>ya compré</b> — cerrar la compra del mes',\n  '• <b>ya compré leche, café</b> — marcar solo esos',\n  '• <b>deshacer</b> — revertir mi último cambio',\n  '• <b>reset</b> — vaciar la lista (pide confirmación)',\n  '',\n  'El 1 de cada mes a las 9 mando la lista completa acá.',\n  'También entiendo audios 🎤',\n].join('\\n');\n\n/** Telegram corta en 4096; partimos por bloques para no cortar al medio. */\nfunction partirMensaje(txt, max = 3900) {\n  if (txt.length <= max) return [txt];\n  const partes = [];\n  let buf = '';\n  for (const bloque of txt.split('\\n\\n')) {\n    if ((buf + '\\n\\n' + bloque).length > max) { if (buf) partes.push(buf); buf = bloque; }\n    else buf = buf ? buf + '\\n\\n' + bloque : bloque;\n  }\n  if (buf) partes.push(buf);\n  return partes;\n}\n\n/** Teclado inline: un ✅ por item (max 90 botones) + acciones al final. */\nfunction tecladoLista(filas, opts = {}) {\n  const botones = filas.slice(0, 90).map(r => ([{\n    text: `✅ ${String(r.item).slice(0, 25)}`,\n    callback_data: `ok:${r.id}`,\n  }]));\n  if (opts.conCerrar !== false) {\n    botones.push([{ text: '🛒 Ya compré todo', callback_data: 'comprado:all' }]);\n  }\n  return { inline_keyboard: botones };\n}\n\n// ------------------------------------------------------------------ prompt\n\n/**\n * Solo ve los fragmentos que el diccionario no supo resolver, asi que es\n * corto y barato. Los placeholders los reemplaza el Code node \"Preparar\".\n */\nconst PROMPT_IA = [\n  'Sos el normalizador de una lista de compras compartida de una casa en Argentina.',\n  'Convertis el mensaje en items de compra. Respondes SOLO un objeto JSON valido,',\n  'sin texto alrededor y sin ```.',\n  '',\n  'Categorias permitidas (exactamente estos strings): ' + CATEGORIAS.join(', ') + '.',\n  'Unidades permitidas: ' + UNIDADES.join(', ') + '.',\n  '',\n  'ITEMS YA CARGADOS (si el producto ya esta, devolve su id en id_existente y en',\n  'cantidad SOLO lo que hay que sumar):',\n  '__LISTA__',\n  '',\n  'ITEMS CONOCIDOS DE LA CASA (reusa el nombre canonico si aplica):',\n  '__CATALOGO__',\n  '',\n  'Reglas:',\n  '1. Un mensaje puede tener varios items: \"detergente y esponjas\" son DOS.',\n  '2. Ignora el verbo: \"se termino el cafe\" / \"falta cafe\" -> item \"Cafe\".',\n  '3. Nombre canonico en singular y con mayuscula inicial, salvo productos que',\n  '   solo existen en plural (Fideos, Galletitas, Huevos).',\n  '4. NO inventes items que no esten en el mensaje.',\n  '5. Cantidad por defecto 1, maximo 99. \"x2\", \"dos\", \"media docena\"=6,',\n  '   \"docena\"=12, \"medio kilo\"=0.5 kg.',\n  '6. Variantes del MISMO producto (descremada, marca, tamano) no crean item',\n  '   nuevo: van en \"nota\".',\n  '7. Productos distintos aunque compartan palabra SI son items nuevos:',\n  '   \"leche\" vs \"leche de almendras\", \"papel higienico\" vs \"papel de cocina\",',\n  '   \"jabon en polvo\" vs \"jabon de tocador\".',\n  '8. Saludos, chistes, emojis y preguntas no son items: devolve items vacio.',\n  '9. confianza entre 0 y 1. Usa menos de 0.5 si dudas de que sea un producto.',\n  '10. Ante la duda, NO anotes: ensuciar la lista molesta mas que no anotar.',\n  '',\n  'Formato exacto de salida:',\n  '{\"items\":[{\"item\":\"Papel higienico\",\"cantidad\":2,\"unidad\":\"u\",',\n  '\"categoria\":\"higiene\",\"id_existente\":null,\"nota\":null,',\n  '\"texto_original\":\"papel higienico x2\",\"confianza\":0.97}]}',\n  '',\n  'MENSAJE:',\n  '__MENSAJE__',\n].join('\\n');\n\n\n// ===== fin de la libreria =====\n\nfunction filasAObjetos(valueRange) {\n  const v = (valueRange && valueRange.values) || [];\n  if (!v.length) return [];\n  const head = v[0].map(h => String(h).trim());\n  return v.slice(1).map((fila, i) => {\n    const o = { _fila: i + 2 };                 // numero de fila real en la hoja\n    head.forEach((h, j) => { o[h] = fila[j] != null ? fila[j] : ''; });\n    return o;\n  });\n}\nfunction leerHojas(json) {\n  const r = json.valueRanges || [];\n  const lista = filasAObjetos(r[0]);\n  const catalogo = filasAObjetos(r[1]);\n  const cfgFilas = filasAObjetos(r[2]);\n  const config = {};\n  for (const f of cfgFilas) config[f.clave] = f.valor;\n  return { lista, catalogo, config };\n}\nconst COL = { id:'A', ciclo:'B', item:'C', variantes:'D', cantidad:'E', unidad:'F',\n              categoria:'G', pedido_por:'H', nota:'I', fecha_alta:'J', estado:'K',\n              fecha_compra:'L', veces_arrastrado:'M', origen:'N', msg_origen:'O' };\nconst ORDEN_COLS = ['id','ciclo','item','variantes','cantidad','unidad','categoria',\n                    'pedido_por','nota','fecha_alta','estado','fecha_compra',\n                    'veces_arrastrado','origen','msg_origen'];\nfunction filaDesdeObjeto(o) { return ORDEN_COLS.map(k => o[k] != null ? o[k] : ''); }\nfunction tg(config, metodo) {\n  return 'https://api.telegram.org/bot' + String(config.telegram_bot_token || '').trim() + '/' + metodo;\n}\n\nconst ctx = $('Gate: necesita IA').first().json;\nconst { lista, config } = leerHojas($('Leer hojas').first().json);\nconst ahora = new Date().toISOString();\n\nlet salida = null;\ntry {\n  const txt = $json.candidates[0].content.parts[0].text;\n  salida = JSON.parse(txt.replace(/^\\`\\`\\`json\\s*|\\s*\\`\\`\\`$/g, ''));\n} catch (e) { salida = null; }\n\nconst itemsIA = salida && Array.isArray(salida.items) ? validarItems(salida.items) : [];\nconst todos = fusionarDuplicados([...(ctx.items_locales || []), ...itemsIA]);\n\nif (!todos.length) {\n  return [{ json: { ...ctx, appends: [], updates: [],\n    respuesta: 'No pude sacar ítems de eso 🤔 Escribí <b>ayuda</b> para ver qué entiendo.' } }];\n}\n\nconst plan = planificarEscrituras(todos, lista,\n  { ciclo: config.ciclo_activo, nombre: ctx.nombre, ahora, msgId: String(ctx.update_id) });\n\nreturn [{ json: { ...ctx,\n  respuesta: renderConfirmacion(plan.appends, plan.updates),\n  appends: plan.appends.map(filaDesdeObjeto),\n  updates: plan.updates.flatMap(u => {\n    const f = lista.find(r => String(r.id) === String(u.id));\n    return f ? [\n      { range: 'Lista!E' + f._fila, values: [[u.cantidad]] },\n      { range: 'Lista!D' + f._fila, values: [[u.variantes]] },\n      { range: 'Lista!H' + f._fila, values: [[u.pedido_por]] },\n    ] : [];\n  }),\n} }];\n"
+      },
+      "id": "n017",
+      "name": "Aplicar IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        40
+      ]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Leer hojas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer hojas": {
+      "main": [
+        [
+          {
+            "node": "Preparar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar": {
+      "main": [
+        [
+          {
+            "node": "Gate: responder",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate: necesita IA",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate: audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate: responder": {
+      "main": [
+        [
+          {
+            "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Responder": {
+      "main": [
+        [
+          {
+            "node": "Gate: hay filas nuevas",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate: hay celdas a actualizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate: hay filas nuevas": {
+      "main": [
+        [
+          {
+            "node": "Agregar filas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate: hay celdas a actualizar": {
+      "main": [
+        [
+          {
+            "node": "Actualizar celdas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate: necesita IA": {
+      "main": [
+        [
+          {
+            "node": "Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini": {
+      "main": [
+        [
+          {
+            "node": "Aplicar IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplicar IA": {
+      "main": [
+        [
+          {
+            "node": "Gate: responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate: audio": {
+      "main": [
+        [
+          {
+            "node": "Telegram getFile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram getFile": {
+      "main": [
+        [
+          {
+            "node": "Bajar audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bajar audio": {
+      "main": [
+        [
+          {
+            "node": "Transcribir (Groq Whisper)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribir (Groq Whisper)": {
+      "main": [
+        [
+          {
+            "node": "Audio → texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audio → texto": {
+      "main": [
+        [
+          {
+            "node": "Gate: responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "America/Argentina/Buenos_Aires",
+    "executionOrder": "v1",
+    "errorWorkflow": ""
+  },
+  "pinData": {}
+}

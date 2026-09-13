@@ -1,3 +1,8 @@
+> Este repo tiene dos proyectos de casa:
+> - **`agent/`** — el watcher de descuentos de PedidosYa (abajo).
+> - **`bot-compras/`** — el bot de lista de compras por Telegram. Ver
+>   [`bot-compras/README.md`](bot-compras/README.md).
+
 # PedidosYa Market — Discount Agent
 
 Agente que escanea el catálogo de **PedidosYa Market** alcanzable desde una

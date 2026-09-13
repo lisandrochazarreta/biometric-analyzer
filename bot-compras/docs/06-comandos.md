@@ -1,7 +1,17 @@
+> **Implementado.** Todos estos comandos están en `compras-ingesta`, en el nodo
+> `Preparar`. En Telegram funcionan igual escritos o con `/` adelante.
+>
+> **Además hay botones**, que en la práctica reemplazan a `ya compré`: el
+> mensaje del día 1 y la respuesta a `lista` traen un ✅ al lado de cada ítem y
+> un 🛒 *Ya compré todo* al final. Tocar el ✅ marca ese ítem sin escribir nada.
+>
+> `deshacer` está especificado acá pero **todavía no implementado** — ver
+> "Lo que falta" en el README.
+
 # Comandos
 
-Todos se detectan con regex en el Code node "Router de comandos" (doc 02, nodo
-10), **antes** de la IA: cuestan cero y no fallan. El LLM además puede devolver
+Todos se detectan con regex en `routerComandos()` (`lib/compras.js`), que corre
+dentro del nodo `Preparar` **antes** de la IA: cuestan cero y no fallan. El LLM además puede devolver
 `tipo: "comando"` para frases sueltas ("pasame la lista", "sacá la cerveza"),
 que caen en las mismas ramas.
 
@@ -31,7 +41,7 @@ Se manda sola el 1 de octubre.
 ```
 
 **Nodos**: `Google Sheets Get rows` (filtro `estado=pendiente`) → `Code` (reusá
-la función `linea()` del doc 05) → `WhatsApp Send`.
+`renderLista()` de la librería) → `Responder`.
 
 Si está vacía: *"La lista está vacía 🤷 Escribime lo que falte."*
 
@@ -169,15 +179,23 @@ ese es el momento en que un bot de lista de compras deja de usarse.
 
 ---
 
-## Resumen para el `Switch` (nodo 11)
+## Dónde vive cada uno
 
-| Salida | Comando | Nodos siguientes |
+Todo pasa dentro del nodo `Preparar` de `compras-ingesta`, en este orden:
+
+| Orden | Caso | Función de `lib/compras.js` |
 |---|---|---|
-| 0 | `lista` | Sheets read → Code formatear → WhatsApp |
-| 1 | `borrar` | Sheets read → Code matcher → IF ambiguo → Sheets update → WhatsApp |
-| 2 | `comprado` | Sheets read → Code → Sheets update + append Historial + Catalogo → WhatsApp ×2 |
-| 3 | `reset` | Code → WhatsApp (pide confirmación) |
-| 4 | `reset_confirmado` | Sheets read Log (ventana 5 min) → IF → Sheets update masivo → WhatsApp ×2 |
-| 5 | `ayuda` | Set (texto fijo) → WhatsApp |
-| 6 | `deshacer` | Sheets read Log → Code revertir → Sheets update → WhatsApp |
-| fallback | *(ninguno)* | **Rama IA** |
+| 1 | botón ✅ / 🛒 | (inline en `Preparar`) |
+| 2 | audio | deriva a los nodos 13-17 |
+| 3 | `ayuda` | `TEXTO_AYUDA` |
+| 4 | `lista` | `renderLista()` + `tecladoLista()` |
+| 5 | `reset` / `confirmar reset` | (inline) |
+| 6 | `borrar X` | `matchParaBorrar()` |
+| 7 | `ya compré [X]` | `matchParaBorrar()` por cada parte |
+| 8 | texto libre | `normalizarLocal()` → `planificarEscrituras()` |
+| 9 | no resuelto | `PROMPT_IA` → nodo `Gemini` |
+
+El orden importa: los comandos se chequean **antes** que el texto libre, así que
+un ítem que se llame igual que un comando nunca se va a poder anotar. Con esta
+lista de comandos no hay colisión posible (no existe un producto que se llame
+"lista" o "reset"), pero tenelo en cuenta si agregás uno.

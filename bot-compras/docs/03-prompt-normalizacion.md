@@ -1,8 +1,19 @@
+> **Implementado en** `lib/compras.js` → `PROMPT_IA`. Ese es el prompt que
+> corre, y es una versión **reducida** del que está acá abajo: como el
+> diccionario ya resolvió lo fácil, al modelo solo le llegan los fragmentos que
+> nadie entendió, con la lista y el catálogo comprimidos. Sale más barato y más
+> exacto.
+>
+> El prompt largo de este documento sirve si algún día querés sacar el
+> diccionario y que el LLM haga todo (`Config.usar_ia = true` + vaciar el
+> catálogo). Las reglas 1–21 son la especificación de comportamiento: cuando
+> el bot se equivoque, la regla que faltó está acá.
+
 # Prompt del paso de normalización con IA
 
 Va en el campo **System** del nodo LLM. El mensaje del usuario va tal cual en el
 campo **User**. `{{ $json.lista_json }}` y `{{ $json.catalogo_json }}` los arma
-el Code node "Armar contexto" (doc 02, nodo 14).
+el Code node `Preparar` (ver [`02-workflows.md`](02-workflows.md)).
 
 Configuración obligatoria: `temperature = 0`, salida JSON forzada (structured
 output / json_schema), `max_tokens = 800`.
@@ -225,7 +236,7 @@ Mensaje: "yerbaaa y fideos x3 tirabuzon"
 - **El catálogo hace el trabajo pesado con el tiempo.** Las primeras dos semanas
   el dedup va a fallar alguna vez; a partir del mes 2, con 60–100 ítems
   canónicos y sus alias en la hoja `Catalogo`, el modelo casi no tiene que
-  adivinar. Por eso vale la pena el nodo 19 del doc 02.
+  adivinar. Por eso conviene ir sumando alias a mano en la hoja `Catalogo`.
 - **No agregues categorías sin tocar el prompt Y el schema Y la hoja `Config`.**
   Si el enum y la guía se desincronizan, el validador manda todo a `otros`.
 - **Si el modelo empieza a inventar ítems**, el problema casi siempre es que

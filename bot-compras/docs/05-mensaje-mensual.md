@@ -1,3 +1,7 @@
+> **Implementado en** `lib/compras.js` → `consolidar()` y `renderMensual()`,
+> con tests en `test/compras.test.js`. El código de este documento es la versión
+> explicada; el que corre es el de la librería.
+
 # El mensaje mensual
 
 Sale el **día 1 a las 09:00** (hora de Buenos Aires) a los dos números.
@@ -155,59 +159,21 @@ return [{ json: {
 
 ---
 
-## Envío: el detalle que te va a morder
+## Envío
 
-WhatsApp **no te deja mandar texto libre** si esa persona no te escribió en las
-últimas 24 h, y **las variables de un template no aceptan saltos de línea**. O
-sea: la lista formateada no entra en un template. Por eso el envío tiene dos
-caminos (ver `01-arquitectura.md` §4):
+En Telegram no hay nada que resolver: el bot manda el mensaje al grupo cuando
+quiere, gratis, sin ventana de 24 h y sin templates. Se va por
+`HTTP POST api.telegram.org/bot<token>/sendMessage` con `parse_mode: HTML` y un
+`reply_markup` con un ✅ por ítem.
 
-```
-IF  $now.diff(ultimo_inbound_<persona>, 'hours').hours < 23
-    ├─ true  → WhatsApp: Send message (texto libre, GRATIS)
-    └─ false → WhatsApp: Send template "lista_mensual_v1" ({{1}} = "octubre")
-               + Config.envio_pendiente_<persona> = true
-               + Config.ultimo_mensaje_mensual = <texto>
-```
+> Esta sección, en la versión WhatsApp, era la más complicada de todo el diseño:
+> las variables de un template no aceptan saltos de línea, así que la lista
+> formateada no entraba, y había que mandar un ping y esperar que respondieran.
+> Está archivada en [`A1-whatsapp.md`](A1-whatsapp.md) § 4.
 
-Cuando la persona responde cualquier cosa al template, el nodo 8 del workflow de
-ingesta ve el flag, le manda la lista completa y lo baja.
-
-**Template a dar de alta en Meta** (categoría **utility**, idioma *Spanish (ARG)*
-o *Spanish*):
-
-```
-Nombre: lista_mensual_v1
-Categoría: Utility
-Body:
-Tu lista de compras de {{1}} ya está armada 🛒
-Respondeme cualquier cosa y te la paso completa.
-
-Ejemplo para la aprobación — {{1}}: octubre
-```
-
-Pedila **utility**, no marketing: cuesta la mitad y no cae en el filtro de
-promociones. Si Meta te la reclasifica a marketing, reescribila sacando todo lo
-que suene a oferta y volvé a mandarla.
-
-**Corte a 4096 caracteres**: WhatsApp rechaza mensajes más largos. Con 14 ítems
-estás en ~900 caracteres, pero poné el guard igual:
-
-```js
-const MAX = 3900;
-const txt = $json.texto;
-if (txt.length <= MAX) return [{ json: { partes: [txt] } }];
-const bloques = txt.split('\n\n');
-const partes = []; let buf = '';
-for (const b of bloques) {
-  if ((buf + '\n\n' + b).length > MAX) { partes.push(buf); buf = b; }
-  else buf = buf ? buf + '\n\n' + b : b;
-}
-if (buf) partes.push(buf);
-return [{ json: { partes } }];
-```
-
----
+El corte a 4096 caracteres sí sigue aplicando (Telegram tiene el mismo límite);
+lo maneja `partirMensaje()` en la librería, con un test que verifica que no se
+pierda contenido al partir.
 
 ## Extra que vale la pena: el recordatorio del día 3
 
